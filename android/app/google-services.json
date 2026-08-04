@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "358801425890",
+    "project_id": "water-app-bunrueang",
+    "storage_bucket": "water-app-bunrueang.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:358801425890:android:ec4317cd79becffab225bb",
+        "android_client_info": {
+          "package_name": "com.bunrueang.waterapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBaTQyFs1Olni8_vcLgJY1NcRJBkaVfUyA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
