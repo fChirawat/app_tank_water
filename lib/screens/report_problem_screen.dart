@@ -24,6 +24,7 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
 
   String? _selectedProblem; // ประเภทปัญหา
   final List<File> _images = []; // รูปที่แนบ
+  static const int _maxImages = 4;
 
   double? _lat; // จุดที่มีปัญหา
   double? _lng;
@@ -130,18 +131,45 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
     try {
       if (source == ImageSource.gallery) {
         final picked = await picker.pickMultiImage(imageQuality: 70);
+
         if (picked.isNotEmpty) {
-          setState(() => _images.addAll(picked.map((x) => File(x.path))));
+          final remain = _maxImages - _images.length;
+
+          if (remain <= 0) {
+            _toast('สามารถแนบรูปได้สูงสุด $_maxImages รูป');
+            return;
+          }
+
+          setState(() {
+            _images.addAll(
+              picked.take(remain).map((x) => File(x.path)),
+            );
+          });
+
+          if (picked.length > remain) {
+            _toast('สามารถแนบรูปได้สูงสุด $_maxImages รูป');
+          }
         }
       } else {
         final picked =
-            await picker.pickImage(source: source, imageQuality: 70);
-        if (picked != null) setState(() => _images.add(File(picked.path)));
+            await picker.pickImage(
+              source: source,
+              imageQuality: 70,
+            );
+
+        if (picked != null) {
+          if (_images.length >= _maxImages) {
+            _toast('สามารถแนบรูปได้สูงสุด $_maxImages รูป');
+            return;
+          }
+
+          setState(() => _images.add(File(picked.path)));
+        }
       }
     } catch (e) {
       _toast('เลือกรูปไม่สำเร็จ: $e');
     }
-  }
+    } 
 
   // กรอกครบพร้อมส่งไหม (ต้องเลือกประเภท + แนบรูปอย่างน้อย 1)
   bool get _canSend => _selectedProblem != null && _images.isNotEmpty;
@@ -649,6 +677,10 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
 
   // ===== รูปภาพ =====
   Widget _buildImagePicker() {
+    final isFull = _images.length >= _maxImages;
+    final activeColor = AppColors.primary;
+    final disabledColor = Colors.grey.shade400;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -660,15 +692,20 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
           const SizedBox(height: 12),
         ],
         GestureDetector(
-          onTap: _pickImages,
-          child: Container(
+          onTap: isFull ? null : _pickImages,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 22),
             decoration: BoxDecoration(
-              color: const Color(0xFFFAFAFF),
+              color: isFull
+                  ? const Color(0xFFF5F5F7)
+                  : const Color(0xFFFAFAFF),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: AppColors.primary.withValues(alpha: 0.45),
+                color: isFull
+                    ? Colors.grey.shade300
+                    : activeColor.withValues(alpha: 0.45),
                 width: 1.4,
               ),
             ),
@@ -677,29 +714,38 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
                 Container(
                   width: 42,
                   height: 42,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFEFEAFD),
+                  decoration: BoxDecoration(
+                    color: isFull
+                        ? Colors.grey.shade200
+                        : const Color(0xFFEFEAFD),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.add_a_photo,
-                      color: AppColors.primary, size: 20),
+                  child: Icon(
+                    isFull ? Icons.check : Icons.add_a_photo,
+                    color: isFull ? disabledColor : activeColor,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(height: 10),
-                const Text(
-                  'เพิ่มรูปภาพ',
+                Text(
+                  isFull ? 'เพิ่มรูปครบแล้ว' : 'เพิ่มรูปภาพ',
                   style: TextStyle(
-                    color: AppColors.primary,
+                    color: isFull ? disabledColor : activeColor,
                     fontWeight: FontWeight.bold,
                     fontSize: 14.5,
                   ),
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  _images.isEmpty
-                      ? 'รูปภาพช่วยให้เจ้าหน้าที่เข้าใจปัญหาได้เร็วขึ้น'
-                      : 'เลือกแล้ว ${_images.length} รูป',
+                  isFull
+                      ? 'ครบ $_maxImages/$_maxImages รูปแล้ว'
+                      : _images.isEmpty
+                          ? 'เพิ่มได้สูงสุด $_maxImages รูป'
+                          : 'เลือกแล้ว ${_images.length}/$_maxImages รูป',
                   style: const TextStyle(
-                      color: AppColors.textGrey, fontSize: 12),
+                    color: AppColors.textGrey,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),

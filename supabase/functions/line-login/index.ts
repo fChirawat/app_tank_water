@@ -102,14 +102,20 @@ Deno.serve(async (req) => {
     if (existing) {
       const { data: roles } = await admin
         .from('user_roles')
-        .select('role')
+        .select('role, village')
         .eq('profile_id', existing.id);
+
+      // หมู่บ้านที่เจ้าหน้าที่/ผู้ใหญ่บ้านดูแล (จาก role ไม่ใช่โปรไฟล์)
+      const officerRole = (roles ?? []).find((r) => r.role === 'officer');
+      const headRole = (roles ?? []).find((r) => r.role === 'village_head');
 
       return json({
         isNewUser: false,
         accessToken,
         profile: existing,
         roles: (roles ?? []).map((r) => r.role),
+        officerVillage: officerRole?.village ?? null,
+        headVillage: headRole?.village ?? null,
       });
     }
 

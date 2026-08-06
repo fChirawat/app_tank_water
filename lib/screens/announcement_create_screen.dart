@@ -406,7 +406,7 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'หมู่บ้านของคุณ: ${AppSession.myVillage ?? '-'}',
+              'หมู่บ้านที่คุณดูแล: ${AppSession.officerVillage ?? '-'}',
               style: const TextStyle(
                   color: AppColors.textDark,
                   fontSize: 14,

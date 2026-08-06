@@ -8,6 +8,7 @@ import '../widgets/app_dialog.dart';
 import '../data/villages.dart';
 import '../data/water_tank.dart';
 import '../services/tank_service.dart';
+import '../services/session.dart';
 import 'map_picker_screen.dart';
 
 // หน้าเพิ่ม/แก้ไขข้อมูลแทงค์น้ำ
@@ -65,8 +66,20 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
       _lat = t.lat;
       _lng = t.lng;
       _existingImageUrls.addAll(t.imageUrls);
+    } else {
+      // โหมดเพิ่มใหม่: ถ้าเป็นเจ้าหน้าที่หมู่บ้าน (ไม่ใช่เทศบาล/แอดมิน)
+      // ล็อกหมู่บ้านเป็นหมู่ที่ตัวเองดูแล
+      if (_lockVillage) {
+        _selectedVillage = AppSession.officerVillage;
+        if (_selectedVillage != null) {
+          _selectedMoo = mooOfVillage(_selectedVillage!);
+        }
+      }
     }
   }
+
+  // เมนูเพิ่มแทงค์เป็นของเจ้าหน้าที่หมู่บ้าน -> ล็อกหมู่บ้านตัวเองเสมอ
+  bool get _lockVillage => AppSession.officerVillage != null;
 
   @override
   void dispose() {
@@ -220,17 +233,47 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
                       const SizedBox(height: 16),
                       _label('หมู่บ้าน'),
                       const SizedBox(height: 8),
-                      _dropdown<String>(
-                        value: _selectedVillage,
-                        hint: 'เลือกหมู่บ้าน',
-                        items: kVillages,
-                        itemLabel: (v) => villageWithMoo(v), // แสดง "หมู่ 1 บุญเรืองเหนือ"
-                        onChanged: (v) => setState(() {
-                          _selectedVillage = v;
-                          // เซ็ตหมู่ที่อัตโนมัติจากหมู่บ้าน
-                          _selectedMoo = mooOfVillage(v);
-                        }),
-                      ),
+                      // เจ้าหน้าที่หมู่บ้าน -> ล็อกหมู่ตัวเอง / เทศบาล-แอดมิน -> เลือกได้
+                      _lockVillage
+                          ? Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF3F0FD),
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: AppColors.primaryLight),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.lock_outline,
+                                      size: 18, color: AppColors.primary),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _selectedVillage != null
+                                          ? villageWithMoo(_selectedVillage!)
+                                          : '-',
+                                      style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                          color: AppColors.textDark),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : _dropdown<String>(
+                              value: _selectedVillage,
+                              hint: 'เลือกหมู่บ้าน',
+                              items: kVillages,
+                              itemLabel: (v) => villageWithMoo(v),
+                              onChanged: (v) => setState(() {
+                                _selectedVillage = v;
+                                _selectedMoo = mooOfVillage(v);
+                              }),
+                            ),
                       const SizedBox(height: 16),
                       // ===== ข้อมูลเพิ่มเติมของแทงค์ =====
                       Row(

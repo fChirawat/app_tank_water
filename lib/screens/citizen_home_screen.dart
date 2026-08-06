@@ -9,10 +9,13 @@ import 'report_problem_screen.dart';
 import 'admin_users_screen.dart';
 import 'complaint_list_screen.dart';
 import 'tank_status_screen.dart';
+import 'my_reports_screen.dart';
 import 'repair_status_screen.dart';
 import 'village_head_receive_screen.dart';
 import 'budget_approve_screen.dart';
 import 'palad_list_screen.dart';
+import 'palad_dashboard_screen.dart';
+import 'village_head_dashboard_screen.dart';
 import 'announcement_create_screen.dart';
 import 'announcement_list_screen.dart';
 import '../data/announcement.dart';
@@ -572,6 +575,11 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen>
           context,
           MaterialPageRoute(builder: (_) => const TankStatusScreen()),
         );
+      case 'ประวัติแจ้งปัญหา':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const MyReportsScreen()),
+        );
       case 'แจ้งปัญหา':
         _reportProblem();
       case 'จัดการผู้ใช้':
@@ -619,6 +627,23 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen>
               builder: (_) => const PaladListScreen(mode: PaladMode.approve)),
         );
         _loadMenuCounts();
+      case 'Dashboard':
+        // ถ้ามี role เทศบาล ให้เปิด Dashboard เทศบาลก่อน
+        // ถ้าเป็นผู้ใหญ่บ้าน ให้เปิด Dashboard ที่กรองเฉพาะหมู่บ้านตัวเอง
+        if (widget.roles.contains(UserRole.palad) ||
+            widget.roles.contains(UserRole.admin)) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const PaladDashboardScreen()),
+          );
+        } else if (widget.roles.contains(UserRole.villageHead)) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const VillageHeadDashboardScreen(),
+            ),
+          );
+        }
       default:
         break; // เมนูที่ยังไม่มีหน้า -> ไม่ทำอะไร
     }

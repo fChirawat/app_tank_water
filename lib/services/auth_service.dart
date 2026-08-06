@@ -64,7 +64,12 @@ class AuthService {
     final roles = (data['roles'] as List?)?.cast<String>() ?? const <String>[];
 
     await AppSession.save(
-        token: token ?? '', profileData: profile, roleList: roles);
+      token: token ?? '',
+      profileData: profile,
+      roleList: roles,
+      officerVillageArg: data['officerVillage'] as String?,
+      headVillageArg: data['headVillage'] as String?,
+    );
 
     // ผูกเครื่องนี้กับบัญชี เพื่อให้ส่งแจ้งเตือนหาได้
     await PushService.syncToken();
@@ -226,7 +231,12 @@ class AuthService {
       final roles =
           (data['roles'] as List?)?.cast<String>() ?? const <String>[];
 
-      await AppSession.updateProfile(profileData: profile, roleList: roles);
+      await AppSession.updateProfile(
+        profileData: profile,
+        roleList: roles,
+        officerVillageArg: data['officerVillage'] as String?,
+        headVillageArg: data['headVillage'] as String?,
+      );
 
       // อัปเดตรหัสเครื่องทุกครั้งที่เปิดแอป (เผื่อ Firebase เปลี่ยนให้ใหม่)
       await PushService.syncToken();

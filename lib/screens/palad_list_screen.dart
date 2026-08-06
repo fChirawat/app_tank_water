@@ -447,8 +447,7 @@ class _PaladDetailState extends State<_PaladDetail> {
             _row('รายละเอียดเพิ่มเติม', c.detail!),
           if (_surveyNote != null && _surveyNote!.isNotEmpty)
             _row('มีความประสงค์', _surveyNote!),
-          if (c.shortfall != null && c.shortfall! > 0)
-            _row('เงินที่ขาด', '${_money(c.shortfall!)} บาท'),
+          _row('วันที่แจ้ง', _fmtDateTime(c.createdAt)),
         ],
       ),
     );
@@ -642,4 +641,17 @@ class _PaladDetailState extends State<_PaladDetail> {
     }
     return buf.toString();
   }
+}
+
+// แปลงวันเวลาแจ้ง -> "5 ส.ค. 2569 14:30 น."
+String _fmtDateTime(DateTime dt) {
+  const months = [
+    '', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+  ];
+  final local = dt.toLocal();
+  final year = local.year + 543;
+  final hh = local.hour.toString().padLeft(2, '0');
+  final mm = local.minute.toString().padLeft(2, '0');
+  return '${local.day} ${months[local.month]} $year $hh:$mm น.';
 }

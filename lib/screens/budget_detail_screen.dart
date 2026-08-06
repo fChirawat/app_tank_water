@@ -137,10 +137,47 @@ class _BudgetDetailScreenState extends State<BudgetDetailScreen> {
     );
 
     if (choice == 'approve') {
-      _approve();
+      _confirmApprove();
     } else if (choice == 'insufficient') {
       _insufficient();
     }
+  }
+
+  // ยืนยันก่อนอนุมัติงบ (งบพอ)
+  Future<void> _confirmApprove() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('ยืนยันอนุมัติงบ'),
+        content: const Text(
+          'เมื่ออนุมัติแล้ว เรื่องจะเข้าสู่ขั้นตอนซ่อม '
+          'และย้อนกลับมาแก้ไขไม่ได้',
+          style: TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('ยกเลิก',
+                style: TextStyle(color: AppColors.textGrey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('ยืนยันอนุมัติ'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) _approve();
   }
 
   // การ์ดตัวเลือกในป๊อปอัป
@@ -412,6 +449,7 @@ class _BudgetDetailScreenState extends State<BudgetDetailScreen> {
             _row('มีความประสงค์', _surveyNote!),
           if (c.shortfall != null && c.shortfall! > 0)
             _row('เงินที่ขาด', '${_money(c.shortfall!)} บาท'),
+          _row('วันที่แจ้ง', _fmtDateTime(c.createdAt)),
         ],
       ),
     );
@@ -721,4 +759,17 @@ class _BudgetDetailScreenState extends State<BudgetDetailScreen> {
     }
     return buf.toString();
   }
+}
+
+// แปลงวันเวลาแจ้ง -> "5 ส.ค. 2569 14:30 น."
+String _fmtDateTime(DateTime dt) {
+  const months = [
+    '', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+  ];
+  final local = dt.toLocal();
+  final year = local.year + 543;
+  final hh = local.hour.toString().padLeft(2, '0');
+  final mm = local.minute.toString().padLeft(2, '0');
+  return '${local.day} ${months[local.month]} $year $hh:$mm น.';
 }

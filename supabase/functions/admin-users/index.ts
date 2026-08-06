@@ -83,6 +83,21 @@ Deno.serve(async (req) => {
         const title = ((body.title as string | undefined) ?? '').trim();
         const firstName = ((body.firstName as string | undefined) ?? '').trim();
         const lastName = ((body.lastName as string | undefined) ?? '').trim();
+        const roleFilter = ((body.role as string | undefined) ?? '').trim();
+
+        // ถ้ากรองตามตำแหน่ง -> หา profile_id ที่มี role นั้นก่อน
+        let filterIds: string[] | null = null;
+        if (roleFilter.length > 0) {
+          const { data: roleMatch } = await admin
+            .from('user_roles')
+            .select('profile_id')
+            .eq('role', roleFilter);
+          filterIds = (roleMatch ?? []).map((r) => r.profile_id as string);
+          // ไม่มีใครถือ role นี้ -> คืนว่างเลย
+          if (filterIds.length === 0) {
+            return json({ success: true, users: [], total: 0, page });
+          }
+        }
 
         // count: 'exact' -> ให้ฐานข้อมูลนับจำนวนทั้งหมดมาด้วย (ไว้คำนวณจำนวนหน้า)
         let q = admin
@@ -97,6 +112,8 @@ Deno.serve(async (req) => {
         if (title.length > 0) q = q.ilike('title', `%${title}%`);
         if (firstName.length > 0) q = q.ilike('first_name', `%${firstName}%`);
         if (lastName.length > 0) q = q.ilike('last_name', `%${lastName}%`);
+        // กรองตามตำแหน่ง (เฉพาะ id ที่มี role นั้น)
+        if (filterIds !== null) q = q.in('id', filterIds);
 
         // เอาเฉพาะช่วงของหน้านี้ (เช่น หน้า 0 = แถว 0-9, หน้า 1 = แถว 10-19)
         const from = page * pageSize;
@@ -159,7 +176,49 @@ Deno.serve(async (req) => {
           return json({ error: 'กรุณาเลือกหมู่บ้านที่ดูแล' }, 400);
         }
 
-        // ลบ role เดิมก่อน (เผื่อเปลี่ยนหมู่บ้าน) แล้วใส่ใหม่
+        // ===== เช็ค 1 ต่อ 1: หมู่บ้านนี้มีคนถือ role นี้อยู่แล้วไหม =====
+        // (ยกเว้นตัวเอง กรณีแค่เปลี่ยนหมู่บ้าน)
+        const force = body.force === true;
+        if (role === 'village_head' || role === 'officer') {
+          const { data: existingHolders } = await admin
+            .from('user_roles')
+            .select('profile_id')
+            .eq('role', role)
+            .eq('village', village)
+            .neq('profile_id', targetId);
+
+          if (existingHolders && existingHolders.length > 0) {
+            // มีคนดูแลหมู่บ้านนี้อยู่แล้ว
+            if (!force) {
+              // ยังไม่ยืนยัน -> คืนชื่อคนเก่าให้แอปถาม
+              const oldId = existingHolders[0].profile_id as string;
+              const { data: oldProfile } = await admin
+                .from('profiles')
+                .select('title, first_name, last_name')
+                .eq('id', oldId)
+                .maybeSingle();
+              const oldName = oldProfile
+                ? [oldProfile.title, oldProfile.first_name, oldProfile.last_name]
+                    .filter((s) => s && s.length > 0)
+                    .join(' ')
+                : 'ผู้ใช้เดิม';
+              return json({
+                needConfirm: true,
+                currentHolder: oldName,
+                village,
+              });
+            }
+            // ยืนยันแล้ว -> ย้าย role คนเก่าออกจากหมู่บ้านนี้
+            await admin
+              .from('user_roles')
+              .delete()
+              .eq('role', role)
+              .eq('village', village)
+              .neq('profile_id', targetId);
+          }
+        }
+
+        // ลบ role เดิมของคนนี้ก่อน (เผื่อเปลี่ยนหมู่บ้าน) แล้วใส่ใหม่
         await admin
           .from('user_roles')
           .delete()

@@ -1,31 +1,22 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter_native_html_to_pdf/flutter_native_html_to_pdf.dart';
 import 'package:http/http.dart' as http;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
 import '../data/complaint.dart';
 import '../data/repair.dart';
 
 /// สร้างเอกสาร "ใบคำร้องทั่วไป" เป็น PDF ขนาด A4
-/// ใช้โครงสร้างตามแบบฟอร์มราชการในภาพตัวอย่าง
+/// โดยใช้ Native WebView จัดวางภาษาไทยผ่าน HTML/CSS
 class RequestPdfService {
-  static const double _bodyFontSize = 12.2;
-  static const double _smallFontSize = 10.4;
+  static final HtmlToPdfConverter _converter = HtmlToPdfConverter();
 
   static Future<Uint8List> build({
     required Complaint complaint,
     required List<RepairItem> items,
     required String officerName,
   }) async {
-    final document = pw.Document();
-
-    final regularFont = await PdfGoogleFonts.sarabunRegular();
-    final boldFont = await PdfGoogleFonts.sarabunBold();
-
-    final images = await _loadImages(complaint.imageUrls);
-
     final problemType = complaint.problemType.trim();
     final detail = (complaint.detail ?? '').trim();
     final subject = _isOtherProblem(problemType) && detail.isNotEmpty
@@ -42,8 +33,6 @@ class RequestPdfService {
       (sum, item) => sum + (item.quantity * item.unitPrice),
     );
 
-    // โมเดลปัจจุบันมี shortfall แต่ไม่มี availableBudget โดยตรง
-    // จึงคำนวณงบประมาณที่มีจาก total - shortfall
     final systemShortfall = complaint.shortfall;
     final shortfall = systemShortfall == null
         ? total
@@ -51,140 +40,46 @@ class RequestPdfService {
     final availableBudget =
         (total - shortfall).clamp(0, double.infinity).toDouble();
 
-    document.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(42, 30, 42, 28),
-        theme: pw.ThemeData.withFont(
-          base: regularFont,
-          bold: boldFont,
-        ),
-        build: (context) => [
-          _header(
-            date: complaint.createdAt,
-            boldFont: boldFont,
-          ),
-          pw.SizedBox(height: 15),
-          _fieldLine(
-            label: 'เรื่อง',
-            value: subject,
-            boldFont: boldFont,
-          ),
-          pw.SizedBox(height: 7),
-          pw.Text(
-            'เรียน  นายกเทศมนตรีตำบลบุญเรือง',
-            style: pw.TextStyle(
-              font: boldFont,
-              fontSize: _bodyFontSize,
-            ),
-          ),
-          pw.SizedBox(height: 13),
-          _placeLine(moo: moo, village: village),
-          pw.SizedBox(height: 7),
-          _fieldLine(
-            label: 'มีความประสงค์',
-            value: purpose,
-            boldFont: boldFont,
-          ),
-          pw.SizedBox(height: 14),
-          pw.SizedBox(height: 2),
-          _contentFrame(
-            images: images,
-            items: items,
-            total: total,
-            availableBudget: availableBudget,
-            shortfall: shortfall,
-            boldFont: boldFont,
-          ),
-          pw.SizedBox(height: 9),
-          _closingText(),
-          pw.SizedBox(height: 20),
-          _signatureBlock(officerName: formattedOfficerName),
-        ],
-      ),
+    final imageDataUrls = await _loadImagesAsDataUrls(
+      complaint.imageUrls,
+      maxImages: 4,
     );
 
-    return document.save();
-  }
+    final html = _buildHtml(
+      date: complaint.createdAt,
+      subject: subject,
+      moo: moo,
+      village: village,
+      purpose: purpose,
+      officerName: formattedOfficerName,
+      images: imageDataUrls,
+      items: items,
+      total: total,
+      availableBudget: availableBudget,
+      shortfall: shortfall,
+    );
 
-  static Future<List<pw.MemoryImage>> _loadImages(
-    List<String> imageUrls,
-  ) async {
-    final images = <pw.MemoryImage>[];
-
-    for (final rawUrl in imageUrls) {
-      final url = rawUrl.trim();
-      if (url.isEmpty) continue;
-
-      try {
-        final response = await http.get(Uri.parse(url));
-        if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-          images.add(pw.MemoryImage(response.bodyBytes));
-        }
-      } catch (_) {
-        // ข้ามรูปที่โหลดไม่ได้ เพื่อให้ PDF ส่วนอื่นยังสร้างต่อได้
-      }
+    final bytes = await _converter.convertHtmlToPdfBytes(html: html);
+    if (bytes == null || bytes.isEmpty) {
+      throw StateError('ไม่สามารถสร้างไฟล์ PDF ได้');
     }
 
-    return images;
+    return bytes;
   }
 
-  static pw.Widget _header({
+  static String _buildHtml({
     required DateTime date,
-    required pw.Font boldFont,
+    required String subject,
+    required String moo,
+    required String village,
+    required String purpose,
+    required String officerName,
+    required List<String> images,
+    required List<RepairItem> items,
+    required double total,
+    required double availableBudget,
+    required double shortfall,
   }) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        pw.Center(
-          child: pw.Text(
-            'ใบคำร้องทั่วไป',
-            style: pw.TextStyle(
-              font: boldFont,
-              fontSize: 18,
-            ),
-          ),
-        ),
-
-        // เว้นพื้นที่หลังชื่อเอกสาร แล้ววางกลุ่มข้อมูลไว้ด้านขวาบน
-        pw.SizedBox(height: 18),
-
-        pw.Align(
-          alignment: pw.Alignment.topRight,
-          child: pw.SizedBox(
-            // ความกว้างของกลุ่มอิงตามบรรทัดวันที่
-            // ข้อความสำนักงาน 2 บรรทัดจะจัดกึ่งกลางอยู่เหนือวันที่
-            width: 285,
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-              children: [
-                pw.Text(
-                  'สำนักงานเทศบาลตำบลบุญเรือง',
-                  textAlign: pw.TextAlign.center,
-                  style: const pw.TextStyle(
-                    fontSize: _bodyFontSize,
-                  ),
-                ),
-                pw.Text(
-                  'อำเภอเชียงของ จังหวัดเชียงราย',
-                  textAlign: pw.TextAlign.center,
-                  style: const pw.TextStyle(
-                    fontSize: _bodyFontSize,
-                  ),
-                ),
-                pw.SizedBox(height: 3),
-                pw.Center(
-                  child: _dateLine(date),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  static pw.Widget _dateLine(DateTime date) {
     const months = <String>[
       '',
       'มกราคม',
@@ -203,504 +98,428 @@ class RequestPdfService {
 
     final buddhistYear = date.year + 543;
 
-    return pw.Row(
-      mainAxisSize: pw.MainAxisSize.min,
-      crossAxisAlignment: pw.CrossAxisAlignment.end,
-      children: [
-        pw.Text('วันที่ ', style: const pw.TextStyle(fontSize: _bodyFontSize)),
-        _compactValue('${date.day}', width: 32),
-        pw.Text(' เดือน ', style: const pw.TextStyle(fontSize: _bodyFontSize)),
-        _compactValue(months[date.month], width: 72),
-        pw.Text(' พ.ศ. ', style: const pw.TextStyle(fontSize: _bodyFontSize)),
-        _compactValue('$buddhistYear', width: 48),
-      ],
-    );
-  }
+    final imageHtml = images.isEmpty
+        ? '<div class="empty-image">ไม่มีรูปภาพประกอบ</div>'
+        : '''
+          <div class="image-grid count-${images.length}">
+            ${images.map((dataUrl) => '''
+              <div class="image-cell">
+                <img src="$dataUrl" alt="รูปภาพประกอบ">
+              </div>
+            ''').join()}
+          </div>
+        ''';
 
-  static pw.Widget _fieldLine({
-    required String label,
-    required String value,
-    required pw.Font boldFont,
-  }) {
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.end,
-      children: [
-        pw.Text(
-          '$label  ',
-          style: pw.TextStyle(
-            font: boldFont,
-            fontSize: _bodyFontSize,
-          ),
-        ),
-        pw.Expanded(
-          child: _lineValue(
-            value,
-            textAlign: pw.TextAlign.left,
-          ),
-        ),
-      ],
-    );
-  }
+    final itemRows = items.isEmpty
+        ? '''
+          <tr>
+            <td class="center">-</td>
+            <td class="center">ไม่มีรายการวัสดุ</td>
+            <td class="center">-</td>
+            <td class="center">-</td>
+            <td class="center">-</td>
+          </tr>
+        '''
+        : List.generate(items.length, (index) {
+            final item = items[index];
+            final rowTotal = item.quantity * item.unitPrice;
+            return '''
+              <tr>
+                <td class="center">${index + 1}</td>
+                <td>${_escapeHtml(item.name.trim())}</td>
+                <td class="center">${item.quantity}</td>
+                <td class="right">${_money(item.unitPrice)}</td>
+                <td class="right">${_money(rowTotal)}</td>
+              </tr>
+            ''';
+          }).join();
 
-  static pw.Widget _placeLine({
-    required String moo,
-    required String village,
-  }) {
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.end,
-      children: [
-        pw.Text('หมู่ที่ ', style: const pw.TextStyle(fontSize: _smallFontSize)),
-        _compactValue(moo, width: 34),
-        pw.SizedBox(width: 5),
-        pw.Text('หมู่บ้าน ', style: const pw.TextStyle(fontSize: _smallFontSize)),
-        _compactValue(village, width: 108),
-        pw.SizedBox(width: 5),
-        pw.Text(
-          'ตำบล บุญเรือง',
-          style: const pw.TextStyle(fontSize: _smallFontSize),
-        ),
-        pw.SizedBox(width: 6),
-        pw.Text(
-          'อำเภอ เชียงของ',
-          style: const pw.TextStyle(fontSize: _smallFontSize),
-        ),
-        pw.SizedBox(width: 6),
-        pw.Text(
-          'จังหวัด เชียงราย',
-          style: const pw.TextStyle(fontSize: _smallFontSize),
-        ),
-      ],
-    );
-  }
-
-  static pw.Widget _lineValue(
-    String value, {
-    pw.TextAlign textAlign = pw.TextAlign.center,
-  }) {
-    return pw.Container(
-      height: 18,
-      padding: const pw.EdgeInsets.fromLTRB(4, 0, 4, 1),
-      alignment: pw.Alignment.bottomLeft,
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(
-          bottom: pw.BorderSide(
-            width: 0.6,
-            style: pw.BorderStyle.dotted,
-          ),
-        ),
-      ),
-      child: pw.Text(
-        value,
-        maxLines: 1,
-        overflow: pw.TextOverflow.clip,
-        textAlign: textAlign,
-        style: const pw.TextStyle(fontSize: _bodyFontSize),
-      ),
-    );
-  }
-
-  static pw.Widget _compactValue(String value, {required double width}) {
-    return pw.Container(
-      width: width,
-      height: 17,
-      padding: const pw.EdgeInsets.fromLTRB(2, 0, 2, 1),
-      alignment: pw.Alignment.bottomCenter,
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(
-          bottom: pw.BorderSide(
-            width: 0.55,
-            style: pw.BorderStyle.dotted,
-          ),
-        ),
-      ),
-      child: pw.Text(
-        value,
-        maxLines: 1,
-        overflow: pw.TextOverflow.clip,
-        textAlign: pw.TextAlign.center,
-        style: const pw.TextStyle(fontSize: _smallFontSize),
-      ),
-    );
-  }
-
-  static pw.Widget _contentFrame({
-    required List<pw.MemoryImage> images,
-    required List<RepairItem> items,
-    required double total,
-    required double availableBudget,
-    required double shortfall,
-    required pw.Font boldFont,
-  }) {
-    return pw.Container(
-      width: double.infinity,
-      padding: const pw.EdgeInsets.all(8),
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(width: 0.85),
-      ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-        children: [
-          _sectionTitle('รูปภาพประกอบ', boldFont),
-          pw.SizedBox(height: 5),
-          _imageArea(
-            images,
-            itemCount: items.length,
-          ),
-          pw.SizedBox(height: 8),
-          _sectionTitle('รายการวัสดุ', boldFont),
-          pw.SizedBox(height: 4),
-          _itemsTable(items, boldFont),
-          pw.SizedBox(height: 6),
-          pw.Container(
-            padding: const pw.EdgeInsets.fromLTRB(8, 4, 5, 3),
-            decoration: const pw.BoxDecoration(
-              border: pw.Border(
-                top: pw.BorderSide(width: 0.5),
-              ),
-            ),
-            child: _summaryBlock(
-              total: total,
-              availableBudget: availableBudget,
-              shortfall: shortfall,
-              boldFont: boldFont,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static pw.Widget _sectionTitle(String title, pw.Font boldFont) {
-    return pw.Container(
-      height: 22,
-      alignment: pw.Alignment.centerLeft,
-      padding: const pw.EdgeInsets.symmetric(horizontal: 7),
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(
-          bottom: pw.BorderSide(width: 0.55),
-        ),
-      ),
-      child: pw.Text(
-        title,
-        style: pw.TextStyle(
-          font: boldFont,
-          fontSize: _bodyFontSize,
-        ),
-      ),
-    );
-  }
-
-  static pw.Widget _imageArea(
-    List<pw.MemoryImage> images, {
-    required int itemCount,
-  }) {
-    final shownImages = images.take(4).toList();
-
-    // ลดความสูงของรูปลงอัตโนมัติเมื่อมีรายการวัสดุหลายรายการ
-    // เพื่อรักษาสมดุลและไม่ให้เอกสารล้น A4 หน้าเดียว
-    final hasManyItems = itemCount >= 6;
-
-    if (shownImages.isEmpty) {
-      return pw.Container(
-        height: hasManyItems ? 62 : 82,
-        alignment: pw.Alignment.center,
-        decoration: pw.BoxDecoration(
-          border: pw.Border.all(width: 0.45),
-        ),
-        child: pw.Text(
-          'ไม่มีรูปภาพประกอบ',
-          style: const pw.TextStyle(fontSize: _smallFontSize),
-        ),
-      );
+    return '''
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    @page { size: A4 portrait; margin: 10mm 12mm 9mm; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: #000;
+      background: #fff;
+      font-family: "Noto Sans Thai", "Sarabun", Tahoma, sans-serif;
+      font-size: 21px;
+      line-height: 1.4;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .document-title {
+      margin: 0 0 17px;
+      padding-top: 10px;
+      text-align: center;
+      font-size: 38px;
+      line-height: 1.7;
+      font-weight: 700;
+    }
+    .office-block {
+      width: 285px;
+      margin: 0 0 11px auto;
+      text-align: center;
+      line-height: 1.4;
+    }
+    .date-row {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      gap: 8px;
+      margin-top: 5px;
+      white-space: nowrap;
+    }
+    .date-value {
+      display: inline-block;
+      min-width: 40px;
+      margin: 0 4px;
+      padding: 2px 6px 1px;
+      border-bottom: 1px dotted #000;
+      line-height: 1.5;
+      text-align: center;
+    }
+    .date-month { min-width: 110px; }
+    .date-year { min-width: 60px; }
+    .field-row {
+      display: flex;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 2px 4px;
+      width: 100%;
+      margin-bottom: 9px;
+    }
+    .field-label {
+      flex: 0 0 auto;
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.5;
+      white-space: nowrap;
+    }
+    .field-value {
+      flex: 0 1 auto;
+      min-width: 40px;
+      min-height: 20px;
+      padding: 2px 6px 1px;
+      border-bottom: 1px dotted #000;
+      line-height: 1.5;
+      text-align: center;
+      overflow-wrap: anywhere;
+    }
+    .field-plain {
+      flex: 0 1 auto;
+      line-height: 1.5;
+      padding-bottom: 1px;
+    }
+    .place-line .field-value { min-width: 30px; }
+    .place-line .field-plain { font-weight: 700; }
+    .place-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 5px;
+      width: 100%;
+      margin: 10px 0 7px;
+      font-size: 18px;
+      white-space: nowrap;
+    }
+    .place-value {
+      display: inline-block;
+      min-height: 21px;
+      padding: 0 3px 0px;
+      border-bottom: 1px dotted #000;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .moo-value { width: 34px; }
+    .village-value {
+      width: 112px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .content-frame {
+      width: 100%;
+      margin-top: 14px;
+      padding: 8px;
+      border: 1px solid #000;
+      break-inside: avoid;
+    }
+    .section-title {
+      min-height: 23px;
+      padding: 2px 7px 4px;
+      border-bottom: 1px solid #777;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+    .image-grid {
+      display: grid;
+      width: 100%;
+      gap: 6px;
+      margin: 5px 0 8px;
+    }
+    .image-grid.count-1 { grid-template-columns: 1fr; }
+    .image-grid.count-2,
+    .image-grid.count-3,
+    .image-grid.count-4 { grid-template-columns: repeat(2, 1fr); }
+    .image-cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 165px;
+      padding: 4px;
+      border: 1px solid #888;
+      overflow: hidden;
+    }
+    .image-grid.count-1 .image-cell { height: 240px; }
+    .image-cell img {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .empty-image {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100px;
+      margin: 5px 0 8px;
+      border: 1px solid #888;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin-top: 4px;
+      font-size: 18px;
+    }
+    th, td {
+      padding: 3px 4px;
+      border: 1px solid #555;
+      vertical-align: middle;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    th { font-weight: 700; text-align: center; }
+    .col-index { width: 8%; }
+    .col-name { width: 47%; }
+    .col-quantity { width: 13%; }
+    .col-price, .col-total { width: 16%; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .summary {
+      width: 340px;
+      margin: 6px 0 0 auto;
+      padding-top: 4px;
+      border-top: 1px solid #888;
+      font-size: 18px;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      column-gap: 10px;
+      line-height: 1.6;
+      white-space: nowrap;
+    }
+    .summary-label { text-align: left; }
+    .summary-value { text-align: right; }
+    .summary-row.strong { font-weight: 700; }
+    .closing {
+      margin: 9px 28px 0;
+      font-size: 21px;
+      line-height: 1.65;
+      text-indent: 26px;
     }
 
-    // มีรูปเดียว: ใช้หนึ่งแถวใหญ่เต็มความกว้าง
-    if (shownImages.length == 1) {
-      return pw.Container(
-        width: double.infinity,
-        height: hasManyItems ? 92 : 128,
-        padding: const pw.EdgeInsets.all(5),
-        alignment: pw.Alignment.center,
-        decoration: pw.BoxDecoration(
-          border: pw.Border.all(width: 0.5),
-        ),
-        child: pw.Image(
-          shownImages.first,
-          fit: pw.BoxFit.contain,
-        ),
-      );
+    .subject-value {
+      position: relative;
+      top: 2px;
     }
 
-    // มี 2 รูป: แสดงหนึ่งแถว สองช่องขนาดเท่ากัน
-    if (shownImages.length == 2) {
-      final height = hasManyItems ? 78.0 : 102.0;
-      return pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-        children: [
-          pw.Expanded(
-            child: _imageCell(shownImages[0], height: height),
-          ),
-          pw.SizedBox(width: 6),
-          pw.Expanded(
-            child: _imageCell(shownImages[1], height: height),
-          ),
-        ],
-      );
+    .moo-value-fix {
+      position: relative;
+      top: 5px;
     }
 
-    // มี 3–4 รูป: แสดงสองคอลัมน์และแบ่งเป็นสองแถว
-    final cellHeight = hasManyItems ? 55.0 : 68.0;
-    final rows = <pw.Widget>[];
-
-    for (var index = 0; index < shownImages.length; index += 2) {
-      final rightIndex = index + 1;
-
-      rows.add(
-        pw.Padding(
-          padding: pw.EdgeInsets.only(
-            bottom: rightIndex + 1 < shownImages.length ? 5 : 0,
-          ),
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-            children: [
-              pw.Expanded(
-                child: _imageCell(
-                  shownImages[index],
-                  height: cellHeight,
-                ),
-              ),
-              pw.SizedBox(width: 6),
-              pw.Expanded(
-                child: rightIndex < shownImages.length
-                    ? _imageCell(
-                        shownImages[rightIndex],
-                        height: cellHeight,
-                      )
-                    : pw.Container(
-                        height: cellHeight,
-                        decoration: pw.BoxDecoration(
-                          border: pw.Border.all(width: 0.5),
-                        ),
-                      ),
-              ),
-            ],
-          ),
-        ),
-      );
+    .village-value-fix {
+      position: relative;
+      top: 4.5px;
     }
 
-    return pw.Column(children: rows);
+    .purpose-value {
+      position: relative;
+      top: 2px;
+    }
+    .signature {
+      width: 330px;
+      margin: 17px 20px 0 auto;
+      text-align: center;
+      font-size: 21px;
+      line-height: 1.5;
+      break-inside: avoid;
+    }
+    .signature-space { height: 25px; }
+    .signature-line { margin-bottom: 3px; white-space: nowrap; }
+    @media print {
+      html, body { width: 210mm; }
+      .content-frame, table, .signature { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <h1 class="document-title">ใบคำร้องทั่วไป</h1>
+
+  <div class="office-block">
+    <div>สำนักงานเทศบาลตำบลบุญเรือง</div>
+    <div>อำเภอเชียงของ จังหวัดเชียงราย</div>
+    <div class="date-row">
+      <span>วันที่</span>
+      <span class="date-value">${date.day}</span>
+      <span>เดือน</span>
+      <span class="date-value date-month">${months[date.month]}</span>
+      <span>พ.ศ.</span>
+      <span class="date-value date-year">$buddhistYear</span>
+    </div>
+  </div>
+
+  <div class="field-row">
+    <div class="field-label">เรื่อง</div>
+    <div class="field-value">${_escapeHtml(subject)}</div>
+  </div>
+
+  <div class="field-row">
+    <div class="field-label">เรียน</div>
+    <div class="field-plain">นายกเทศมนตรีตำบลบุญเรือง</div>
+  </div>
+
+  <div class="field-row place-line">
+    <div class="field-label">หมู่ที่</div>
+    <div class="field-value">${_escapeHtml(moo)}</div>
+    <div class="field-plain">บ้าน</div>
+    <div class="field-value">${_escapeHtml(village)}</div>
+    <div class="field-plain">ตำบล</div>
+    <div class="field-value">บุญเรือง</div>
+    <div class="field-plain">อำเภอ</div>
+    <div class="field-value">เชียงของ</div>
+    <div class="field-plain">จังหวัด</div>
+    <div class="field-value">เชียงราย</div>
+  </div>
+
+  <div class="field-row">
+    <div class="field-label">มีความประสงค์</div>
+    <div class="field-value">${_escapeHtml(purpose)}</div>
+  </div>
+
+  <section class="content-frame">
+    <div class="section-title">รูปภาพประกอบ</div>
+    $imageHtml
+    <div class="section-title">รายการวัสดุ</div>
+
+    <table>
+      <colgroup>
+        <col class="col-index">
+        <col class="col-name">
+        <col class="col-quantity">
+        <col class="col-price">
+        <col class="col-total">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>ลำดับ</th>
+          <th>ชื่อสินค้า</th>
+          <th>จำนวน</th>
+          <th>ราคาต่อชิ้น</th>
+          <th>ราคารวม</th>
+        </tr>
+      </thead>
+      <tbody>$itemRows</tbody>
+    </table>
+
+    <div class="summary">
+      <div class="summary-row">
+        <div class="summary-label">ราคารวมทั้งหมด</div>
+        <div class="summary-value">${_money(total)} บาท</div>
+      </div>
+      <div class="summary-row">
+        <div class="summary-label">งบประมาณที่มี</div>
+        <div class="summary-value">${_money(availableBudget)} บาท</div>
+      </div>
+      <div class="summary-row strong">
+        <div class="summary-label">เงินที่ขาด</div>
+        <div class="summary-value">${_money(shortfall)} บาท</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="closing">
+    ขอให้ดำเนินการให้ข้าพเจ้าตามความประสงค์ด้วย
+    หากมีค่าธรรมเนียม ข้าพเจ้ายินดีปฏิบัติตามระเบียบของทางราชการ
+  </div>
+
+  <div class="signature">
+    <div>ขอแสดงความนับถือ</div>
+    <div class="signature-space"></div>
+    <div class="signature-line">ลงชื่อ ...........................</div>
+    <div>(นายธนศักดิ์ แอ่นปัญญา)</div>
+    <div>นายกเทศมนตรีตำบลบุญเรือง</div>
+  </div>
+</body>
+</html>
+''';
   }
 
-  static pw.Widget _imageCell(
-    pw.MemoryImage image, {
-    required double height,
-  }) {
-    return pw.Container(
-      height: height,
-      padding: const pw.EdgeInsets.all(4),
-      alignment: pw.Alignment.center,
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(width: 0.5),
-      ),
-      child: pw.Image(
-        image,
-        fit: pw.BoxFit.contain,
-      ),
-    );
-  }
+  static Future<List<String>> _loadImagesAsDataUrls(
+    List<String> imageUrls, {
+    required int maxImages,
+  }) async {
+    final images = <String>[];
 
-  static pw.Widget _itemsTable(List<RepairItem> items, pw.Font boldFont) {
-    pw.Widget headerCell(String text) {
-      return pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 3.5),
-        alignment: pw.Alignment.center,
-        child: pw.Text(
-          text,
-          textAlign: pw.TextAlign.center,
-          style: pw.TextStyle(font: boldFont, fontSize: _smallFontSize),
-        ),
-      );
-    }
+    for (final rawUrl in imageUrls.take(maxImages)) {
+      final url = rawUrl.trim();
+      if (url.isEmpty) continue;
 
-    pw.Widget valueCell(
-      String text, {
-      pw.Alignment alignment = pw.Alignment.centerLeft,
-    }) {
-      return pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-        alignment: alignment,
-        child: pw.Text(
-          text,
-          style: const pw.TextStyle(fontSize: _smallFontSize),
-        ),
-      );
-    }
+      try {
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 15));
 
-    final rows = <pw.TableRow>[
-      pw.TableRow(
-        children: [
-          headerCell('ลำดับ'),
-          headerCell('ชื่อสินค้า'),
-          headerCell('จำนวน'),
-          headerCell('ราคาต่อชิ้น'),
-          headerCell('ราคารวม'),
-        ],
-      ),
-    ];
+        if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
+          continue;
+        }
 
-    if (items.isEmpty) {
-      rows.add(
-        pw.TableRow(
-          children: [
-            valueCell('-', alignment: pw.Alignment.center),
-            valueCell('ไม่มีรายการวัสดุ', alignment: pw.Alignment.center),
-            valueCell('-', alignment: pw.Alignment.center),
-            valueCell('-', alignment: pw.Alignment.center),
-            valueCell('-', alignment: pw.Alignment.center),
-          ],
-        ),
-      );
-    } else {
-      for (var index = 0; index < items.length; index++) {
-        final item = items[index];
-        final rowTotal = item.quantity * item.unitPrice;
+        final contentType =
+            response.headers['content-type']?.split(';').first.trim();
+        final mimeType = _supportedImageMimeType(contentType);
+        if (mimeType == null) continue;
 
-        rows.add(
-          pw.TableRow(
-            children: [
-              valueCell('${index + 1}', alignment: pw.Alignment.center),
-              valueCell(item.name.trim()),
-              valueCell('${item.quantity}', alignment: pw.Alignment.center),
-              valueCell(
-                _money(item.unitPrice),
-                alignment: pw.Alignment.centerRight,
-              ),
-              valueCell(
-                _money(rowTotal),
-                alignment: pw.Alignment.centerRight,
-              ),
-            ],
-          ),
-        );
+        images.add('data:$mimeType;base64,${base64Encode(response.bodyBytes)}');
+      } catch (_) {
+        // ข้ามรูปที่โหลดไม่ได้ เพื่อให้ส่วนอื่นของ PDF สร้างต่อได้
       }
     }
 
-    return pw.Table(
-      border: pw.TableBorder.all(width: 0.5),
-      columnWidths: {
-        0: const pw.FixedColumnWidth(40),
-        1: const pw.FlexColumnWidth(3.8),
-        2: const pw.FixedColumnWidth(52),
-        3: const pw.FixedColumnWidth(80),
-        4: const pw.FixedColumnWidth(80),
-      },
-      children: rows,
-    );
+    return images;
   }
 
-  static pw.Widget _summaryBlock({
-    required double total,
-    required double availableBudget,
-    required double shortfall,
-    required pw.Font boldFont,
-  }) {
-    pw.Widget amountRow(
-      String label,
-      double value, {
-      bool bold = false,
-    }) {
-      return pw.Padding(
-        padding: const pw.EdgeInsets.only(top: 1.5),
-        child: pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.end,
-          children: [
-            pw.SizedBox(
-              width: 125,
-              child: pw.Text(
-                label,
-                textAlign: pw.TextAlign.right,
-                style: pw.TextStyle(
-                  font: bold ? boldFont : null,
-                  fontSize: _smallFontSize,
-                ),
-              ),
-            ),
-            pw.SizedBox(width: 10),
-            pw.SizedBox(
-              width: 115,
-              child: pw.Text(
-                '${_money(value)} บาท',
-                textAlign: pw.TextAlign.right,
-                style: pw.TextStyle(
-                  font: bold ? boldFont : null,
-                  fontSize: _smallFontSize,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
+  static String? _supportedImageMimeType(String? value) {
+    switch (value?.toLowerCase()) {
+      case 'image/jpeg':
+      case 'image/jpg':
+        return 'image/jpeg';
+      case 'image/png':
+        return 'image/png';
+      case 'image/webp':
+        return 'image/webp';
+      case 'image/gif':
+        return 'image/gif';
+      default:
+        return null;
     }
-
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        amountRow('ราคารวมทั้งหมด', total),
-        amountRow('งบประมาณที่มี', availableBudget),
-        amountRow('เงินที่ขาด', shortfall, bold: true),
-      ],
-    );
-  }
-
-  static pw.Widget _closingText() {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 28),
-      child: pw.Text(
-        '        ขอให้ดำเนินการให้ข้าพเจ้าตามความประสงค์ด้วย '
-        'หากมีค่าธรรมเนียม ข้าพเจ้ายินดีปฏิบัติตามระเบียบของทางราชการ',
-        textAlign: pw.TextAlign.left,
-        style: const pw.TextStyle(
-          fontSize: _bodyFontSize,
-          lineSpacing: 2.5,
-        ),
-      ),
-    );
-  }
-
-  static pw.Widget _signatureBlock({required String officerName}) {
-    return pw.Align(
-      alignment: pw.Alignment.centerRight,
-      child: pw.SizedBox(
-        width: 275,
-        child: pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.center,
-          children: [
-            pw.Text(
-              'ขอแสดงความนับถือ',
-              style: const pw.TextStyle(fontSize: _bodyFontSize),
-            ),
-            pw.SizedBox(height: 24),
-            pw.Text(
-              'ลงชื่อ ................................................',
-              style: const pw.TextStyle(fontSize: _bodyFontSize),
-            ),
-            pw.SizedBox(height: 3),
-            pw.Text(
-              officerName.isEmpty
-                  ? '(........................................)'
-                  : '($officerName)',
-              style: const pw.TextStyle(fontSize: _bodyFontSize),
-            ),
-            pw.SizedBox(height: 2),
-            pw.Text(
-              'ปลัดเทศบาลตำบลบุญเรือง',
-              style: const pw.TextStyle(fontSize: _bodyFontSize),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   static bool _isOtherProblem(String problemType) {
@@ -711,7 +530,6 @@ class RequestPdfService {
   static String _formatOfficerName(String value) {
     var result = value.trim().replaceAll(RegExp(r'\s+'), ' ');
 
-    // จัดคำนำหน้าไม่ให้แยกออกจากชื่อ เช่น "นาย จิรวัฒน์" -> "นายจิรวัฒน์"
     for (final prefix in ['นาย', 'นาง', 'นางสาว']) {
       if (result.startsWith('$prefix ')) {
         result = '$prefix${result.substring(prefix.length + 1)}';
@@ -720,6 +538,15 @@ class RequestPdfService {
     }
 
     return result;
+  }
+
+  static String _escapeHtml(String value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
   }
 
   static String _money(num value) {

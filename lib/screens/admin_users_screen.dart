@@ -18,6 +18,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   final _lastNameController = TextEditingController();
 
   String? _title; // คำนำหน้าที่เลือก (null = ทั้งหมด)
+  String? _role; // ตำแหน่งที่เลือก (null = ทั้งหมด)
   int _page = 0; // หน้าปัจจุบัน (เริ่มที่ 0)
 
   UserPage? _result; // ผลลัพธ์หน้าปัจจุบัน
@@ -49,6 +50,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     try {
       final result = await AdminService.listUsers(
         title: _title,
+        role: _role,
         firstName: _firstNameController.text,
         lastName: _lastNameController.text,
         page: _page,
@@ -79,6 +81,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     FocusScope.of(context).unfocus();
     setState(() {
       _title = null;
+      _role = null;
       _firstNameController.clear();
       _lastNameController.clear();
       _page = 0;
@@ -205,6 +208,8 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         ),
         const SizedBox(height: 10),
         _buildTextField(_lastNameController, 'นามสกุล'),
+        const SizedBox(height: 10),
+        _buildRoleDropdown(),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -248,6 +253,37 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildRoleDropdown() {
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAFAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String?>(
+          value: _role,
+          isExpanded: true,
+          hint: const Text('ตำแหน่ง',
+              style: TextStyle(color: AppColors.textGrey, fontSize: 13.5)),
+          icon: const Icon(Icons.keyboard_arrow_down,
+              color: AppColors.textGrey),
+          items: [
+            const DropdownMenuItem<String?>(
+                value: null, child: Text('ทุกตำแหน่ง')),
+            ..._assignableRoles.entries.map(
+              (e) => DropdownMenuItem<String?>(
+                  value: e.key, child: Text(e.value)),
+            ),
+          ],
+          onChanged: (v) => setState(() => _role = v),
+        ),
+      ),
     );
   }
 
@@ -574,23 +610,82 @@ class _RoleSheetState extends State<_RoleSheet> {
   }
 
   // เปลี่ยนหมู่บ้านของ role ที่เปิดอยู่แล้ว (ตั้ง role ซ้ำด้วยหมู่บ้านใหม่)
+  // เรียก addRole พร้อมถามยืนยันถ้าหมู่บ้านมีคนดูแลอยู่แล้ว
+  // คืน true = สำเร็จ, false = ยกเลิก/ล้มเหลว
+  Future<bool> _addRoleWithConfirm(
+      String role, String? village) async {
+    final roleLabel = role == 'village_head' ? 'ผู้ใหญ่บ้าน' : 'เจ้าหน้าที่';
+    // ชื่อคนใหม่ (คนที่กำลังจะตั้ง)
+    final newName = [
+      widget.user.title ?? '',
+      widget.user.firstName,
+      widget.user.lastName,
+    ].where((s) => s.isNotEmpty).join(' ');
+    try {
+      var result =
+          await AdminService.addRole(widget.user.id, role, village: village);
+
+      // หมู่บ้านมีคนดูแลอยู่แล้ว -> ถามยืนยันเปลี่ยนตัว
+      if (result.needConfirm) {
+        if (!mounted) return false;
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: Text('เปลี่ยน$roleLabel'),
+            content: Text(
+              'หมู่บ้าน "$village" มี$roleLabelอยู่แล้วคือ '
+              '${result.currentHolder}\n\n'
+              'ต้องการเปลี่ยนเป็น $newName แทนใช่หรือไม่?',
+              style: const TextStyle(fontSize: 14, height: 1.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('ยกเลิก',
+                    style: TextStyle(color: AppColors.textGrey)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('เปลี่ยน'),
+              ),
+            ],
+          ),
+        );
+        if (ok != true) return false;
+        // ยืนยัน -> เรียกซ้ำแบบ force
+        result = await AdminService.addRole(widget.user.id, role,
+            village: village, force: true);
+      }
+      return true;
+    } catch (e) {
+      if (mounted) AppDialog.error(context, 'ทำรายการไม่สำเร็จ');
+      return false;
+    }
+  }
+
   Future<void> _changeVillage(String role) async {
     final village = await _pickVillage();
     if (village == null) return;
     setState(() => _busyRole = role);
-    try {
-      // ตั้ง role เดิมซ้ำด้วยหมู่บ้านใหม่ (addRole ใช้ upsert อยู่แล้ว)
-      await AdminService.addRole(widget.user.id, role, village: village);
+    final ok = await _addRoleWithConfirm(role, village);
+    if (ok) {
       setState(() {
         if (role == 'village_head') _headVillage = village;
         if (role == 'officer') _officerVillage = village;
       });
       widget.onChanged();
-    } catch (e) {
-      if (mounted) AppDialog.error(context, 'เปลี่ยนหมู่บ้านไม่สำเร็จ');
-    } finally {
-      if (mounted) setState(() => _busyRole = null);
     }
+    if (mounted) setState(() => _busyRole = null);
   }
 
   Future<void> _toggle(String role, bool add) async {
@@ -607,15 +702,21 @@ class _RoleSheetState extends State<_RoleSheet> {
     setState(() => _busyRole = role);
     try {
       if (add) {
-        await AdminService.addRole(
-          widget.user.id,
+        final ok = await _addRoleWithConfirm(
           role,
-          // ทั้งผู้ใหญ่บ้านและเจ้าหน้าที่ ผูกกับหมู่บ้าน
-          village: (role == 'village_head' || role == 'officer')
+          (role == 'village_head' || role == 'officer')
               ? pickedVillage
               : null,
         );
-        setState(() => _roles.add(role));
+        if (ok) {
+          setState(() => _roles.add(role));
+        } else {
+          // ยกเลิก -> คืนค่า village state ที่ตั้งไว้ล่วงหน้า
+          setState(() {
+            if (role == 'village_head') _headVillage = null;
+            if (role == 'officer') _officerVillage = null;
+          });
+        }
       } else {
         await AdminService.removeRole(widget.user.id, role);
         setState(() {

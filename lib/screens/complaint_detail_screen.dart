@@ -216,10 +216,6 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
                       const SizedBox(height: 18),
                       _buildInfoCard(c),
                       const SizedBox(height: 16),
-                      if (c.detail != null && c.detail!.isNotEmpty) ...[
-                        _buildDetailCard(c),
-                        const SizedBox(height: 16),
-                      ],
                       if (c.imageUrls.isNotEmpty) ...[
                         _buildImages(c),
                         const SizedBox(height: 16),
@@ -300,22 +296,16 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
       title: 'ข้อมูลร้องเรียน',
       child: Column(
         children: [
-          _row('เหตุ', c.problemType),
-          if (c.tankVillage != null)
-            _row('หมู่', 'หมู่ ${c.tankMoo ?? '-'} ${c.tankVillage}'),
           if (c.tankName != null) _row('ชื่อแทงค์', c.tankName!),
           if (c.tankType != null) _row('ประเภท', c.tankType!),
+          if (c.tankVillage != null)
+            _row('หมู่', 'หมู่ ${c.tankMoo ?? '-'} ${c.tankVillage}'),
+          _row('ปัญหา', c.problemType),
+          if (c.detail != null && c.detail!.isNotEmpty)
+            _row('รายละเอียดเพิ่มเติม', c.detail!),
           _row('วันที่แจ้ง', _formatDate(c.createdAt)),
         ],
       ),
-    );
-  }
-
-  Widget _buildDetailCard(Complaint c) {
-    return _cardPlain(
-      title: 'รายละเอียดเพิ่มเติม',
-      child: Text(c.detail!,
-          style: const TextStyle(color: AppColors.textDark, fontSize: 14)),
     );
   }
 
@@ -572,31 +562,6 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          child,
-        ],
-      ),
-    );
-  }
-
-  Widget _cardPlain({required String title, required Widget child}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: AppColors.primary,
-              )),
-          const SizedBox(height: 10),
           child,
         ],
       ),

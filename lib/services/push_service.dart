@@ -18,10 +18,13 @@ final FlutterLocalNotificationsPlugin _localNotif =
 
 // ช่องแจ้งเตือนความสำคัญสูง — ต้องตรงกับ channel_id ที่ server ส่งมา
 const AndroidNotificationChannel _channel = AndroidNotificationChannel(
-  'water_app_channel', // id (ต้องตรงกับฝั่ง server)
-  'การแจ้งเตือนประปา', // ชื่อที่ผู้ใช้เห็นในตั้งค่า
+  'water_app_channel_v2',
+  'การแจ้งเตือนประปา',
   description: 'แจ้งเตือนเรื่องแจ้งซ่อม ประกาศ และสถานะงาน',
-  importance: Importance.high, // สูง = เด้งเด่นกลางจอ + มีเสียง
+  importance: Importance.max,
+  playSound: true,
+  enableVibration: true,
+  sound: RawResourceAndroidNotificationSound('water_alert'),
 );
 
 // ===== ตัวรับแจ้งเตือนตอนแอปปิด/อยู่เบื้องหลัง =====
@@ -92,12 +95,13 @@ class PushService {
   }
 
   // แสดงแจ้งเตือนแบบเด้ง (heads-up) ตอนแอปเปิดอยู่
-  static void _showHeadsUp(RemoteMessage message) {
+  static Future<void> _showHeadsUp(RemoteMessage message) async {
     final notif = message.notification;
     if (notif == null) return;
 
-    _localNotif.show(
-      id: notif.hashCode,
+    await _localNotif.show(
+      id: message.messageId?.hashCode ??
+          DateTime.now().millisecondsSinceEpoch.remainder(100000),
       title: notif.title,
       body: notif.body,
       notificationDetails: NotificationDetails(
@@ -105,8 +109,11 @@ class PushService {
           _channel.id,
           _channel.name,
           channelDescription: _channel.description,
-          importance: Importance.high,
-          priority: Priority.high,
+          importance: Importance.max,
+          priority: Priority.max,
+          playSound: true,
+          enableVibration: true,
+          sound: const RawResourceAndroidNotificationSound('water_alert'),
           icon: '@mipmap/ic_launcher',
         ),
       ),

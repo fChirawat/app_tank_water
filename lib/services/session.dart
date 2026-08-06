@@ -31,6 +31,10 @@ class AppSession {
   // หมู่บ้านในโปรไฟล์ (เช่น "บุญเรืองเหนือ")
   static String? get myVillage => profile?['village'] as String?;
 
+  // หมู่บ้านที่ดูแล (จาก role ไม่ใช่โปรไฟล์)
+  static String? officerVillage;
+  static String? headVillage;
+
   static String? get profileId => profile?['id'] as String?;
 
   // เก็บข้อมูลตอนล็อกอินสำเร็จ (เก็บลงเครื่องด้วย)
@@ -38,10 +42,14 @@ class AppSession {
     required String token,
     Map<String, dynamic>? profileData,
     List<String>? roleList,
+    String? officerVillageArg,
+    String? headVillageArg,
   }) async {
     accessToken = token;
     profile = profileData;
     roles = roleList ?? [];
+    officerVillage = officerVillageArg;
+    headVillage = headVillageArg;
 
     // เขียนลงเครื่อง
     try {
@@ -82,9 +90,13 @@ class AppSession {
   static Future<void> updateProfile({
     Map<String, dynamic>? profileData,
     List<String>? roleList,
+    String? officerVillageArg,
+    String? headVillageArg,
   }) async {
     if (profileData != null) profile = profileData;
     if (roleList != null) roles = roleList;
+    officerVillage = officerVillageArg;
+    headVillage = headVillageArg;
 
     try {
       final prefs = await SharedPreferences.getInstance();

@@ -201,8 +201,8 @@ Deno.serve(async (req) => {
               android: {
                 priority: 'HIGH',
                 notification: {
-                  channel_id: 'water_app_channel',
-                  sound: 'default',
+                  channel_id: 'water_app_channel_v2',
+                  sound: 'water_alert',
                 },
               },
               // ข้อมูลเพิ่มเติม (ไว้ให้แอปรู้ว่าควรเปิดหน้าไหน)

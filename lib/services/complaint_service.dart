@@ -4,6 +4,7 @@ import '../data/complaint.dart';
 import '../data/tank_status.dart';
 import '../data/repair.dart';
 import 'session.dart';
+import 'package:flutter/foundation.dart';
 
 // ผลลัพธ์ getItems: รายการวัสดุ + สาเหตุที่เจอหน้างาน
 class ItemsResult {
@@ -290,6 +291,36 @@ class ComplaintService {
         .toList();
   }
 
+  // ===== ประวัติแจ้งปัญหา (เฉพาะของตัวเอง) แบบแบ่งหน้าทีละ 10 =====
+  static Future<MyReportsPage> fetchMyReports({int page = 0}) async {
+    final response = await _supabase.functions.invoke(
+      'complaints',
+      body: {
+        'accessToken': AppSession.accessToken,
+        'action': 'my-reports',
+        'page': page,
+      },
+    );
+
+    final data = response.data as Map<String, dynamic>;
+
+    if (data['error'] != null) {
+      throw Exception(data['error']);
+    }
+
+    final items = (data['complaints'] as List)
+        .map((row) => Complaint.fromJson(row as Map<String, dynamic>))
+        .toList();
+
+    final total = (data['total'] as num?)?.toInt() ?? items.length;
+
+    return MyReportsPage(
+      items: items,
+      total: total,
+      page: page,
+    );
+  }
+
   // ===== นับงานค้างของแต่ละเมนู (สำหรับ badge) =====
   static Future<Map<String, int>> menuCounts() async {
     final response = await _supabase.functions.invoke(
@@ -382,5 +413,231 @@ class ComplaintService {
     );
     final data = response.data as Map<String, dynamic>;
     if (data['error'] != null) throw Exception(data['error']);
+  }
+
+  // ===== Dashboard เทศบาล =====
+  // mode: 'month' (year + month) | 'year' (year)
+  static Future<DashboardData> fetchPaladDashboard({
+    required String mode,
+    required int year, // ค.ศ.
+    int? month,
+  }) async {
+    final response = await _supabase.functions.invoke(
+      'complaints',
+      body: {
+        'accessToken': AppSession.accessToken,
+        'action': 'palad-dashboard',
+        'mode': mode,
+        'year': year,
+        if (month != null) 'month': month,
+      },
+    );
+
+    final data = response.data as Map<String, dynamic>;
+    if (data['error'] != null) throw Exception(data['error']);
+
+    return DashboardData.fromJson(data);
+  }
+
+  // ===== Dashboard ผู้ใหญ่บ้าน =====
+  // เห็นเฉพาะหมู่บ้านที่ดูแล และแยกข้อมูลตามแทงค์น้ำ
+  static Future<VillageHeadDashboardData> fetchVillageHeadDashboard({
+    required String mode,
+    required int year, // ค.ศ.
+    int? month,
+  }) async {
+    final response = await _supabase.functions.invoke(
+      'complaints',
+      body: {
+        'accessToken': AppSession.accessToken,
+        'action': 'village-head-dashboard',
+        'mode': mode,
+        'year': year,
+        if (month != null) 'month': month,
+      },
+    );
+
+    final data = response.data as Map<String, dynamic>;
+    if (data['error'] != null) throw Exception(data['error']);
+
+    return VillageHeadDashboardData.fromJson(data);
+  }
+
+}
+
+// ผลลัพธ์ประวัติแจ้งปัญหา แบบแบ่งหน้า
+class MyReportsPage {
+  final List<Complaint> items;
+  final int total; // จำนวนเรื่องทั้งหมดของคนนี้
+  final int page; // หน้าปัจจุบัน (เริ่ม 0)
+  const MyReportsPage({
+    required this.items,
+    required this.total,
+    required this.page,
+  });
+
+  int get totalPages => (total / 10).ceil();
+  bool get hasNext => (page + 1) * 10 < total;
+  bool get hasPrev => page > 0;
+}
+
+// ===== ข้อมูล Dashboard เทศบาล =====
+class DashboardPeriod {
+  final String type; // 'month' | 'year'
+  final int year; // ค.ศ.
+  final int? month; // 1-12 (null = ทั้งปี)
+  final String label;
+
+  const DashboardPeriod({
+    required this.type,
+    required this.year,
+    this.month,
+    required this.label,
+  });
+
+  factory DashboardPeriod.fromJson(Map<String, dynamic> json) {
+    return DashboardPeriod(
+      type: json['type'] as String,
+      year: (json['year'] as num).toInt(),
+      month: (json['month'] as num?)?.toInt(),
+      label: json['label'] as String,
+    );
+  }
+}
+
+class VillageCount {
+  final String village;
+  final int count;
+
+  const VillageCount({required this.village, required this.count});
+}
+
+class VillageBudget {
+  final String village;
+  final double budget;
+
+  const VillageBudget({required this.village, required this.budget});
+}
+
+class DashboardData {
+  final List<VillageCount> donut;
+  final List<VillageBudget> bar;
+  final int totalReports;
+  final double totalBudget;
+  final List<DashboardPeriod> periods;
+
+  const DashboardData({
+    required this.donut,
+    required this.bar,
+    required this.totalReports,
+    required this.totalBudget,
+    required this.periods,
+  });
+
+  factory DashboardData.fromJson(Map<String, dynamic> json) {
+    return DashboardData(
+      donut: (json['donut'] as List? ?? [])
+          .map(
+            (item) => VillageCount(
+              village: (item as Map<String, dynamic>)['village'] as String,
+              count: (item['count'] as num).toInt(),
+            ),
+          )
+          .toList(),
+      bar: (json['bar'] as List? ?? [])
+          .map(
+            (item) => VillageBudget(
+              village: (item as Map<String, dynamic>)['village'] as String,
+              budget: (item['budget'] as num).toDouble(),
+            ),
+          )
+          .toList(),
+      totalReports: ((json['totalReports'] as num?) ?? 0).toInt(),
+      totalBudget: ((json['totalBudget'] as num?) ?? 0).toDouble(),
+      periods: (json['periods'] as List? ?? [])
+          .map(
+            (item) => DashboardPeriod.fromJson(
+              item as Map<String, dynamic>,
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+
+// ===== ข้อมูล Dashboard ผู้ใหญ่บ้าน =====
+class TankCount {
+  final String tankId;
+  final String tankName;
+  final int count;
+
+  const TankCount({
+    required this.tankId,
+    required this.tankName,
+    required this.count,
+  });
+}
+
+class TankBudget {
+  final String tankId;
+  final String tankName;
+  final double budget;
+
+  const TankBudget({
+    required this.tankId,
+    required this.tankName,
+    required this.budget,
+  });
+}
+
+class VillageHeadDashboardData {
+  final String village;
+  final List<TankCount> donut;
+  final List<TankBudget> bar;
+  final int totalReports;
+  final double totalBudget;
+  final List<DashboardPeriod> periods;
+
+  const VillageHeadDashboardData({
+    required this.village,
+    required this.donut,
+    required this.bar,
+    required this.totalReports,
+    required this.totalBudget,
+    required this.periods,
+  });
+
+  factory VillageHeadDashboardData.fromJson(Map<String, dynamic> json) {
+    return VillageHeadDashboardData(
+      village: (json['village'] as String?) ?? '',
+      donut: (json['donut'] as List? ?? [])
+          .map(
+            (item) => TankCount(
+              tankId: (item as Map<String, dynamic>)['tankId'] as String,
+              tankName: item['tankName'] as String,
+              count: (item['count'] as num).toInt(),
+            ),
+          )
+          .toList(),
+      bar: (json['bar'] as List? ?? [])
+          .map(
+            (item) => TankBudget(
+              tankId: (item as Map<String, dynamic>)['tankId'] as String,
+              tankName: item['tankName'] as String,
+              budget: (item['budget'] as num).toDouble(),
+            ),
+          )
+          .toList(),
+      totalReports: ((json['totalReports'] as num?) ?? 0).toInt(),
+      totalBudget: ((json['totalBudget'] as num?) ?? 0).toDouble(),
+      periods: (json['periods'] as List? ?? [])
+          .map(
+            (item) => DashboardPeriod.fromJson(
+              item as Map<String, dynamic>,
+            ),
+          )
+          .toList(),
+    );
   }
 }

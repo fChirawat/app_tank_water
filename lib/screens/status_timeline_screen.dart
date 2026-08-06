@@ -206,24 +206,54 @@ class _StatusTimelineScreenState extends State<StatusTimelineScreen> {
             ),
           ),
           // ปัญหาที่แจ้ง = สาเหตุจริง (โชว์เฉพาะเมื่อเจ้าหน้าที่กรอกแล้ว)
-          if (c.surveyNote != null && c.surveyNote!.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            const Divider(height: 1),
+          const SizedBox(height: 14),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+
+          const Text(
+            'ปัญหา',
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 4),
+
+          Text(
+            c.problemType,
+            style: const TextStyle(
+              color: AppColors.textDark,
+              fontSize: 14,
+            ),
+          ),
+
+          if (c.detail != null && c.detail!.trim().isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Text('ปัญหาที่พบ',
-                style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary)),
+
+            const Text(
+              'รายละเอียด',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.bold,
+                color: AppColors.primary,
+              ),
+            ),
+
             const SizedBox(height: 4),
-            Text(c.surveyNote!,
-                style: const TextStyle(
-                    color: AppColors.textDark, fontSize: 14)),
+
+            Text(
+              c.detail!,
+              style: const TextStyle(
+                color: AppColors.textDark,
+                fontSize: 14,
+              ),
+            ),
           ],
-        ],
-      ),
-    );
-  }
+                  ],
+                ),
+              );
+            }
 
   // ===== timeline =====
   Widget _timeline(Complaint c) {

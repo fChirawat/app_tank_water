@@ -84,6 +84,7 @@ Deno.serve(async (req) => {
     const isOfficer = roles.includes('officer');
     const isVillageHead = roles.includes('village_head');
     const isPalad = roles.includes('palad');
+    const isAdmin = roles.includes('admin');
     // หมู่บ้านที่ผู้ใหญ่บ้านคนนี้ดูแล
     const headRow = (roleRows ?? []).find((r) => r.role === 'village_head');
     const headVillage = (headRow?.village as string | undefined) ?? null;
@@ -222,6 +223,40 @@ Deno.serve(async (req) => {
         }
 
         return json({ success: true, complaints: list });
+      }
+
+      // ===== ประวัติแจ้งปัญหา: เฉพาะเรื่องที่ตัวเองแจ้ง (ไม่สน role) =====
+      case 'my-reports': {
+        const pageSize = 10;
+        const pageArg = (body.page as number | undefined) ?? 0;
+        const from = pageArg * pageSize;
+        const to = from + pageSize - 1;
+
+        // นับจำนวนเรื่องทั้งหมดของคนนี้
+        const { count } = await admin
+          .from('complaints')
+          .select('id', { count: 'exact', head: true })
+          .eq('reporter_id', profile.id);
+
+        const { data, error } = await admin
+          .from('complaints')
+          .select(
+            '*, water_tanks(name, type, village, moo), ' +
+            'profiles!complaints_reporter_id_fkey(title, first_name, last_name, house_no, village)',
+          )
+          .eq('reporter_id', profile.id)
+          .order('created_at', { ascending: false })
+          .range(from, to);
+
+        if (error) {
+          return json({ error: 'โหลดข้อมูลไม่สำเร็จ', detail: error.message }, 500);
+        }
+
+        return json({
+          success: true,
+          complaints: data ?? [],
+          total: count ?? 0,
+        });
       }
 
       // ดูสถานะประปา: แทงค์ในหมู่บ้าน + เรื่องร้องเรียนล่าสุดของแต่ละแทงค์
@@ -802,11 +837,288 @@ Deno.serve(async (req) => {
 
       // เช็คว่า token ยังใช้ได้ไหม + คืนข้อมูลล่าสุด
       // ใช้ตอนเปิดแอป (auto login) — ได้ role ล่าสุดด้วยถ้า admin เปลี่ยนให้
+      // ===== Dashboard ผู้ใหญ่บ้าน =====
+      // นับเฉพาะงานที่อนุมัติครบแล้วและเข้าสถานะ repairing
+      // แยกจำนวนเรื่องและงบที่ผู้ใหญ่บ้านรับผิดชอบตามแทงค์น้ำ
+      case 'village-head-dashboard': {
+        if (!isVillageHead) {
+          return json({ error: 'เฉพาะผู้ใหญ่บ้านเท่านั้น' }, 403);
+        }
+        if (!headVillage) {
+          return json({ error: 'ยังไม่ได้กำหนดหมู่บ้านที่ดูแล' }, 400);
+        }
+
+        const mode = (body.mode as string | undefined) ?? 'month';
+        const year = body.year as number | undefined;
+        const month = body.month as number | undefined;
+
+        const { data: logs } = await admin
+          .from('status_logs')
+          .select('complaint_id, status, created_at')
+          .in('status', [
+            'budget_wait',
+            'budget_review',
+            'palad_review',
+            'palad_wait',
+            'repairing',
+          ])
+          .order('created_at', { ascending: true });
+
+        const allLogs = logs ?? [];
+
+        const inRange = (iso: string): boolean => {
+          const d = new Date(iso);
+          const y = d.getUTCFullYear();
+          const m = d.getUTCMonth() + 1;
+          if (mode === 'year') return year === undefined || y === year;
+          return (year === undefined || y === year) &&
+                 (month === undefined || m === month);
+        };
+
+        // งานจะถูกนับเมื่ออนุมัติครบแล้วและเข้าสู่ repairing เท่านั้น
+        const approvedIds = new Set<string>();
+        for (const log of allLogs) {
+          if (log.status === 'repairing' && inRange(log.created_at)) {
+            approvedIds.add(log.complaint_id as string);
+          }
+        }
+
+        const complaintInfo = new Map<
+          string,
+          {
+            tankId: string;
+            tankName: string;
+            village: string;
+            shortfall: number;
+          }
+        >();
+
+        if (approvedIds.size > 0) {
+          const { data: comps, error: compsErr } = await admin
+            .from('complaints')
+            .select('id, tank_id, shortfall, water_tanks(name, village)')
+            .in('id', [...approvedIds]);
+
+          if (compsErr) {
+            return json({ error: 'โหลดข้อมูล Dashboard ไม่สำเร็จ', detail: compsErr.message }, 500);
+          }
+
+          for (const c of comps ?? []) {
+            const tank = c.water_tanks as
+              { name?: string; village?: string } | null;
+            if (tank?.village !== headVillage) continue;
+
+            complaintInfo.set(c.id as string, {
+              tankId: (c.tank_id as string | null) ?? 'unknown',
+              tankName: tank?.name ?? 'ไม่ระบุแทงค์',
+              village: tank?.village ?? 'ไม่ระบุ',
+              shortfall: (c.shortfall as number | null) ?? 0,
+            });
+          }
+        }
+
+        const filteredIds = [...complaintInfo.keys()];
+        const totalCostByComplaint = new Map<string, number>();
+
+        if (filteredIds.length > 0) {
+          const { data: items, error: itemsErr } = await admin
+            .from('repair_items')
+            .select('complaint_id, quantity, unit_price')
+            .in('complaint_id', filteredIds);
+
+          if (itemsErr) {
+            return json({ error: 'โหลดข้อมูลงบไม่สำเร็จ', detail: itemsErr.message }, 500);
+          }
+
+          for (const item of items ?? []) {
+            const id = item.complaint_id as string;
+            const quantity = Number(item.quantity ?? 0);
+            const unitPrice = Number(item.unit_price ?? 0);
+            const amount = quantity * unitPrice;
+            totalCostByComplaint.set(
+              id,
+              (totalCostByComplaint.get(id) ?? 0) + amount,
+            );
+          }
+        }
+
+        const countMap = new Map<string, { tankId: string; tankName: string; count: number }>();
+        const budgetMap = new Map<string, { tankId: string; tankName: string; budget: number }>();
+        let totalBudget = 0;
+
+        for (const [id, info] of complaintInfo.entries()) {
+          const key = info.tankId;
+          const currentCount = countMap.get(key);
+          countMap.set(key, {
+            tankId: info.tankId,
+            tankName: info.tankName,
+            count: (currentCount?.count ?? 0) + 1,
+          });
+
+          const totalCost = totalCostByComplaint.get(id) ?? 0;
+          // ถ้าเทศบาลช่วยสมทบ ผู้ใหญ่บ้านนับเฉพาะเงินที่มี = ค่าซ่อมรวม - เงินที่ขาด
+          // งานที่เทศบาลยังไม่อนุมัติจะยังไม่มี repairing จึงไม่เข้ามานับตั้งแต่ต้น
+          const villageBudget = Math.max(totalCost - info.shortfall, 0);
+          const currentBudget = budgetMap.get(key);
+          budgetMap.set(key, {
+            tankId: info.tankId,
+            tankName: info.tankName,
+            budget: (currentBudget?.budget ?? 0) + villageBudget,
+          });
+          totalBudget += villageBudget;
+        }
+
+        const donut = [...countMap.values()]
+          .sort((a, b) => b.count - a.count);
+        const bar = [...budgetMap.values()]
+          .sort((a, b) => b.budget - a.budget);
+        const totalReports = complaintInfo.size;
+        const periods = buildPeriods(allLogs, 'budget_wait');
+
+        return json({
+          success: true,
+          village: headVillage,
+          donut,
+          bar,
+          totalReports,
+          totalBudget,
+          periods,
+        });
+      }
+
+      case 'palad-dashboard': {
+        // เฉพาะเทศบาล/แอดมิน
+        if (!isPalad && !isAdmin) {
+          return json({ error: 'ไม่มีสิทธิ์' }, 403);
+        }
+
+        // mode: 'month' = ดูเดือนเดียว | 'year' = ดูทั้งปี
+        const mode = (body.mode as string | undefined) ?? 'month';
+        const year = body.year as number | undefined; // ค.ศ.
+        const month = body.month as number | undefined; // 1-12
+
+        // ===== ดึง log ทั้งหมดของ palad_review + repairing มาก่อน =====
+        // (แล้วค่อยกรองช่วงเวลาในโค้ด เพื่อความยืดหยุ่น)
+        const { data: logs } = await admin
+          .from('status_logs')
+          .select('complaint_id, status, created_at')
+          .in('status', ['palad_review', 'palad_wait', 'repairing'])
+          .order('created_at', { ascending: true });
+
+        const allLogs = logs ?? [];
+
+        // ===== หาช่วงเวลาที่เลือก =====
+        // คืน true ถ้า created_at อยู่ในช่วงที่เลือก
+        const inRange = (iso: string): boolean => {
+          const d = new Date(iso);
+          const y = d.getUTCFullYear();
+          const m = d.getUTCMonth() + 1; // 1-12
+          if (mode === 'year') {
+            return year === undefined || y === year;
+          }
+          // month mode
+          return (year === undefined || y === year) &&
+                 (month === undefined || m === month);
+        };
+
+        // ===== หา complaint_id ที่ "ส่งมาเทศบาล" (มี log palad_review) ในช่วง =====
+        // ใช้ created_at ของ palad_review เป็นตัวกรองเดือน
+        const sentIds = new Set<string>();
+        for (const log of allLogs) {
+          if (log.status === 'palad_review' && inRange(log.created_at)) {
+            sentIds.add(log.complaint_id as string);
+          }
+        }
+
+        // ===== หา complaint_id ที่ "เทศบาลสมทบแล้วจริง" =====
+        // = เคยผ่าน palad_wait (เทศบาลรับ) แล้วมี repairing ในช่วง
+        const paladWaitIds = new Set<string>();
+        for (const log of allLogs) {
+          if (log.status === 'palad_wait') {
+            paladWaitIds.add(log.complaint_id as string);
+          }
+        }
+        const subsidizedIds = new Set<string>();
+        for (const log of allLogs) {
+          if (log.status === 'repairing' &&
+              paladWaitIds.has(log.complaint_id as string) &&
+              inRange(log.created_at)) {
+            subsidizedIds.add(log.complaint_id as string);
+          }
+        }
+
+        // ===== ดึงข้อมูล complaint (village + shortfall) ของ id ที่เกี่ยวข้อง =====
+        const allIds = new Set<string>([...subsidizedIds]);
+        const complaintInfo = new Map<
+          string,
+          { village: string; shortfall: number }
+        >();
+
+        if (allIds.size > 0) {
+          const { data: comps } = await admin
+            .from('complaints')
+            .select('id, shortfall, water_tanks(village)')
+            .in('id', [...allIds]);
+
+          for (const c of comps ?? []) {
+            const tank = c.water_tanks as { village?: string } | null;
+            complaintInfo.set(c.id as string, {
+              village: tank?.village ?? 'ไม่ระบุ',
+              shortfall: (c.shortfall as number | null) ?? 0,
+            });
+          }
+        }
+
+        // ===== วงกลม: นับเรื่องที่ส่งมาเทศบาล แยกหมู่บ้าน =====
+        const donutMap = new Map<string, number>();
+        for (const id of subsidizedIds) {
+          const info = complaintInfo.get(id);
+          if (!info) continue;
+          donutMap.set(info.village, (donutMap.get(info.village) ?? 0) + 1);
+        }
+        const donut = [...donutMap.entries()]
+          .map(([village, count]) => ({ village, count }))
+          .sort((a, b) => b.count - a.count);
+
+        // ===== แท่ง: งบสมทบจริง แยกหมู่บ้าน =====
+        const barMap = new Map<string, number>();
+        for (const id of subsidizedIds) {
+          const info = complaintInfo.get(id);
+          if (!info) continue;
+          barMap.set(info.village, (barMap.get(info.village) ?? 0) + info.shortfall);
+        }
+        const bar = [...barMap.entries()]
+          .map(([village, budget]) => ({ village, budget }))
+          .sort((a, b) => b.budget - a.budget);
+
+        // ===== การ์ดตัวเลขรวม =====
+        const totalReports = subsidizedIds.size;
+        let totalBudget = 0;
+        for (const id of subsidizedIds) {
+          totalBudget += complaintInfo.get(id)?.shortfall ?? 0;
+        }
+
+        // ===== รายการเดือน/ปี สำหรับ dropdown (สร้างจากข้อมูลจริง) =====
+        // หาเดือนแรกสุดที่มี palad_review -> สร้างทุกเดือนต่อเนื่องถึงเดือนปัจจุบัน
+        const periods = buildPeriods(allLogs, 'palad_review');
+
+        return json({
+          success: true,
+          donut,
+          bar,
+          totalReports,
+          totalBudget,
+          periods,
+        });
+      }
+
       case 'me': {
         return json({
           success: true,
           profile,
           roles,
+          officerVillage,
+          headVillage,
         });
       }
 
@@ -880,6 +1192,73 @@ function sendPush(payload: {
 }
 
 // บันทึกประวัติการเปลี่ยนสถานะ (สำหรับ timeline)
+// สร้างรายการช่วงเวลาสำหรับ dropdown จากข้อมูลจริง
+// - ทุกเดือนต่อเนื่องตั้งแต่เดือนแรกที่มี palad_review -> เดือนปัจจุบัน
+//   (เดือนที่ไม่มีข้อมูลก็แสดง)
+// - เพิ่มตัวเลือก "ทั้งปี" สำหรับแต่ละปีที่มีข้อมูล
+function buildPeriods(
+  logs: Array<{ status: string; created_at: string }>,
+  startStatus = 'palad_review',
+): Array<{ type: string; year: number; month: number | null; label: string }> {
+  const monthNames = [
+    '', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+    'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+  ];
+
+  // หาเดือนแรกสุดที่มี palad_review
+  let firstDate: Date | null = null;
+  for (const log of logs) {
+    if (log.status !== startStatus) continue;
+    const d = new Date(log.created_at);
+    if (firstDate === null || d < firstDate) firstDate = d;
+  }
+
+  const now = new Date();
+  // ถ้ายังไม่มีข้อมูลเลย -> ใช้เดือนปัจจุบันเป็นจุดเริ่ม
+  const start = firstDate ?? now;
+
+  const startY = start.getUTCFullYear();
+  const startM = start.getUTCMonth() + 1;
+  const endY = now.getUTCFullYear();
+  const endM = now.getUTCMonth() + 1;
+
+  const periods: Array<
+    { type: string; year: number; month: number | null; label: string }
+  > = [];
+  const yearsWithData = new Set<number>();
+
+  // ไล่ทีละเดือน จากปัจจุบันย้อนกลับไปเดือนแรก (ใหม่ -> เก่า)
+  let y = endY;
+  let m = endM;
+  while (y > startY || (y === startY && m >= startM)) {
+    const be = y + 543;
+    periods.push({
+      type: 'month',
+      year: y,
+      month: m,
+      label: `เดือน ${monthNames[m]} ${be}`,
+    });
+    yearsWithData.add(y);
+    m--;
+    if (m < 1) {
+      m = 12;
+      y--;
+    }
+  }
+
+  // เพิ่ม "ทั้งปี" ต่อท้าย (ปีใหม่ก่อน)
+  const yearList = [...yearsWithData].sort((a, b) => b - a);
+  const yearOptions = yearList.map((yr) => ({
+    type: 'year',
+    year: yr,
+    month: null,
+    label: `ปี ${yr + 543}`,
+  }));
+
+  // เอาปีไว้บนสุด ตามด้วยรายเดือน
+  return [...yearOptions, ...periods];
+}
+
 async function logStatus(
   admin: ReturnType<typeof createClient>,
   complaintId: string,

@@ -1,6 +1,13 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'session.dart';
 
+// ผลลัพธ์การเพิ่ม role: ถ้าหมู่บ้านมีคนแล้วต้องให้ยืนยัน
+class AddRoleResult {
+  final bool needConfirm;
+  final String? currentHolder; // ชื่อคนที่ดูแลหมู่บ้านนี้อยู่
+  const AddRoleResult({required this.needConfirm, this.currentHolder});
+}
+
 // ===== ข้อมูลผู้ใช้ 1 คน (สำหรับหน้า admin) =====
 class ManagedUser {
   final String id;
@@ -69,6 +76,7 @@ class AdminService {
     String? title,
     String? firstName,
     String? lastName,
+    String? role, // กรองตามตำแหน่ง
     int page = 0,
   }) async {
     final response = await _supabase.functions.invoke(
@@ -79,6 +87,7 @@ class AdminService {
         'title': title ?? '',
         'firstName': firstName ?? '',
         'lastName': lastName ?? '',
+        'role': role ?? '',
         'page': page,
       },
     );
@@ -99,10 +108,13 @@ class AdminService {
   }
 
   // ===== เพิ่ม role ให้ผู้ใช้ =====
-  static Future<void> addRole(
+  // คืนค่า: ถ้าต้องยืนยัน (หมู่บ้านมีคนแล้ว) จะคืนชื่อคนเก่า
+  // ถ้าสำเร็จคืน null
+  static Future<AddRoleResult> addRole(
     String profileId,
     String role, {
-    String? village, // หมู่บ้าน (จำเป็นถ้าเป็นผู้ใหญ่บ้าน)
+    String? village, // หมู่บ้าน (จำเป็นถ้าเป็นผู้ใหญ่บ้าน/เจ้าหน้าที่)
+    bool force = false, // true = ยืนยันย้ายคนเก่าออก
   }) async {
     final response = await _supabase.functions.invoke(
       'admin-users',
@@ -112,10 +124,19 @@ class AdminService {
         'profileId': profileId,
         'role': role,
         'village': village,
+        'force': force,
       },
     );
     final data = response.data as Map<String, dynamic>;
     if (data['error'] != null) throw Exception(data['error']);
+    // หมู่บ้านมีคนดูแลอยู่แล้ว -> ต้องให้ผู้ใช้ยืนยัน
+    if (data['needConfirm'] == true) {
+      return AddRoleResult(
+        needConfirm: true,
+        currentHolder: data['currentHolder'] as String? ?? 'ผู้ใช้เดิม',
+      );
+    }
+    return const AddRoleResult(needConfirm: false);
   }
 
   // ===== ลบ role ออกจากผู้ใช้ =====
