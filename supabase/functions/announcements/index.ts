@@ -23,6 +23,7 @@ function sendPush(payload: {
   profileIds?: string[];
   title: string;
   body: string;
+  useWaterAlert?: boolean;
 }) {
   try {
     fetch(`${SUPABASE_URL}/functions/v1/push-send`, {
@@ -176,6 +177,7 @@ Deno.serve(async (req) => {
             profileIds: targetIds,
             title: `ประกาศ: ${a.title}`,
             body: when.trim(),
+            useWaterAlert: true,
           });
         }
 

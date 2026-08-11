@@ -17,14 +17,26 @@ final FlutterLocalNotificationsPlugin _localNotif =
     FlutterLocalNotificationsPlugin();
 
 // ช่องแจ้งเตือนความสำคัญสูง — ต้องตรงกับ channel_id ที่ server ส่งมา
-const AndroidNotificationChannel _channel = AndroidNotificationChannel(
-  'water_app_channel_v2',
-  'การแจ้งเตือนประปา',
-  description: 'แจ้งเตือนเรื่องแจ้งซ่อม ประกาศ และสถานะงาน',
+// ===== เสียงพิเศษ water_alert =====
+const AndroidNotificationChannel _alertChannel = AndroidNotificationChannel(
+  'water_app_alert_channel',
+  'การแจ้งเตือนสำคัญ',
+  description: 'ประกาศและเรื่องใหม่ที่ต้องดำเนินการ',
   importance: Importance.max,
   playSound: true,
   enableVibration: true,
   sound: RawResourceAndroidNotificationSound('water_alert'),
+);
+
+// ===== เสียงแจ้งเตือนปกติ =====
+const AndroidNotificationChannel _defaultChannel =
+    AndroidNotificationChannel(
+  'water_app_default_channel',
+  'การแจ้งเตือนทั่วไป',
+  description: 'แจ้งเตือนสถานะงานทั่วไป',
+  importance: Importance.max,
+  playSound: true,
+  enableVibration: true,
 );
 
 // ===== ตัวรับแจ้งเตือนตอนแอปปิด/อยู่เบื้องหลัง =====
@@ -84,36 +96,58 @@ class PushService {
   static Future<void> _setupLocalNotifications() async {
     const androidInit =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
-    await _localNotif.initialize(settings: initSettings);
 
-    // สร้าง channel ความสำคัญสูง (ทำครั้งเดียว ถ้ามีแล้วก็ไม่เป็นไร)
-    await _localNotif
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    const initSettings = InitializationSettings(
+      android: androidInit,
+    );
+
+    await _localNotif.initialize(
+      settings: initSettings,
+    );
+
+    final android = _localNotif.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    await android?.createNotificationChannel(_alertChannel);
+    await android?.createNotificationChannel(_defaultChannel);
   }
 
-  // แสดงแจ้งเตือนแบบเด้ง (heads-up) ตอนแอปเปิดอยู่
+    // แสดงแจ้งเตือนแบบเด้ง (heads-up) ตอนแอปเปิดอยู่
   static Future<void> _showHeadsUp(RemoteMessage message) async {
     final notif = message.notification;
     if (notif == null) return;
 
+    // Server จะส่งค่านี้มาให้
+    final useWaterAlert =
+        message.data['useWaterAlert'] == 'true';
+
+    final channel =
+        useWaterAlert ? _alertChannel : _defaultChannel;
+
     await _localNotif.show(
       id: message.messageId?.hashCode ??
-          DateTime.now().millisecondsSinceEpoch.remainder(100000),
+          DateTime.now()
+              .millisecondsSinceEpoch
+              .remainder(100000),
       title: notif.title,
       body: notif.body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
+          channel.id,
+          channel.name,
+          channelDescription: channel.description,
           importance: Importance.max,
           priority: Priority.max,
           playSound: true,
           enableVibration: true,
-          sound: const RawResourceAndroidNotificationSound('water_alert'),
+
+          // ใช้เสียงพิเศษเฉพาะ alert
+          sound: useWaterAlert
+              ? const RawResourceAndroidNotificationSound(
+                  'water_alert',
+                )
+              : null,
+
           icon: '@mipmap/ic_launcher',
         ),
       ),

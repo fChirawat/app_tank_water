@@ -178,11 +178,13 @@ Deno.serve(async (req) => {
 
         sendPush({
           roles: ['officer'],
-          village: tankName?.village, // เฉพาะเจ้าหน้าที่หมู่บ้านนั้น
+          village: tankName?.village,
           title: 'มีเรื่องแจ้งซ่อมใหม่',
           body: tankName
             ? `${complaint.problemType} — ${tankName.name} หมู่ ${tankName.moo} ${tankName.village}`
             : complaint.problemType,
+
+          useWaterAlert: true,
         });
 
         return json({ success: true, complaint: data });
@@ -404,8 +406,10 @@ Deno.serve(async (req) => {
             village: tk?.village,
             title: 'มีเรื่องรออนุมัติงบ',
             body: tankLabel.length > 0
-              ? `เจ้าหน้าที่ส่งขออนุมัติงบ — ${tankLabel}`
-              : 'เจ้าหน้าที่ส่งขออนุมัติงบประมาณ',
+                ? `เจ้าหน้าที่ส่งขออนุมัติงบ — ${tankLabel}`
+                : 'เจ้าหน้าที่ส่งขออนุมัติงบประมาณ',
+
+            useWaterAlert: true,
           });
         } else if (next === 'done') {
           // แจ้งประชาชนว่าซ่อมเสร็จ
@@ -648,7 +652,10 @@ Deno.serve(async (req) => {
           sendPush({
             roles: ['palad'],
             title: 'มีเรื่องรอสมทบงบ',
-            body: `งบผู้ใหญ่บ้านไม่พอ ขาด ${shortfall.toLocaleString()} บาท`,
+            body:
+                `งบผู้ใหญ่บ้านไม่พอ ขาด ${shortfall.toLocaleString()} บาท`,
+
+            useWaterAlert: true,
           });
 
           return json({ success: true });
@@ -1179,6 +1186,7 @@ function sendPush(payload: {
   village?: string;
   title: string;
   body: string;
+  useWaterAlert?: boolean;
 }) {
   try {
     fetch(`${SUPABASE_URL}/functions/v1/push-send`, {
@@ -1190,6 +1198,10 @@ function sendPush(payload: {
     console.error('ส่งแจ้งเตือนไม่สำเร็จ:', e);
   }
 }
+
+
+
+
 
 // บันทึกประวัติการเปลี่ยนสถานะ (สำหรับ timeline)
 // สร้างรายการช่วงเวลาสำหรับ dropdown จากข้อมูลจริง

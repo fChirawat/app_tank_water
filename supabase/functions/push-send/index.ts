@@ -183,6 +183,14 @@ Deno.serve(async (req) => {
     let sent = 0;
     const deadTokens: string[] = [];
 
+
+
+    const useWaterAlert = body.useWaterAlert === true;
+
+    const channelId = useWaterAlert
+      ? 'water_app_alert_channel'
+      : 'water_app_default_channel';
+
     // FCM ส่งทีละเครื่อง
     for (const token of tokens) {
       const res = await fetch(
@@ -201,12 +209,17 @@ Deno.serve(async (req) => {
               android: {
                 priority: 'HIGH',
                 notification: {
-                  channel_id: 'water_app_channel_v2',
-                  sound: 'water_alert',
+                  channel_id: channelId,
+                  ...(useWaterAlert
+                    ? { sound: 'water_alert' }
+                    : {}),
                 },
               },
-              // ข้อมูลเพิ่มเติม (ไว้ให้แอปรู้ว่าควรเปิดหน้าไหน)
-              data: (body.data as Record<string, string> | undefined) ?? {},
+
+              data: {
+                ...((body.data as Record<string, string> | undefined) ?? {}),
+                useWaterAlert: String(useWaterAlert),
+              },
             },
           }),
         },
