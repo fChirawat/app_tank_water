@@ -4,6 +4,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'session.dart';
 
+
 // ===== จัดการแจ้งเตือน (Push Notification) =====
 //
 // หน้าที่:
@@ -171,6 +172,32 @@ class PushService {
       debugPrint('ส่งรหัสเครื่องไม่สำเร็จ: $e');
     }
   }
+    // เช็กว่าผู้ใช้อนุญาตแจ้งเตือนหรือยัง
+  static Future<bool> isNotificationAllowed() async {
+    final settings =
+        await FirebaseMessaging.instance.getNotificationSettings();
+
+    return settings.authorizationStatus ==
+            AuthorizationStatus.authorized ||
+        settings.authorizationStatus ==
+            AuthorizationStatus.provisional;
+  }
+
+  // ขอสิทธิ์แจ้งเตือนอีกครั้ง
+  static Future<bool> requestNotificationPermission() async {
+    final settings =
+        await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    return settings.authorizationStatus ==
+            AuthorizationStatus.authorized ||
+        settings.authorizationStatus ==
+            AuthorizationStatus.provisional;
+  }
+  
 
   // ===== ลบรหัสเครื่องออกจากเซิร์ฟเวอร์ (ตอนออกจากระบบ) =====
   static Future<void> removeToken() async {

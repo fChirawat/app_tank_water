@@ -93,22 +93,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Widget _buildLogo() {
-    return Container(
-      width: 88,
-      height: 88,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-      ),
-      alignment: Alignment.center,
-      child: const Text(
-        'logo',
-        style: TextStyle(
-          color: AppColors.primary,
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
+    return Image.asset(
+      'assets/icon.png',
+      width: 110,
+      height: 110,
+      fit: BoxFit.contain,
     );
   }
 

@@ -22,6 +22,7 @@ import '../data/announcement.dart';
 import '../services/announcement_service.dart';
 import '../services/complaint_service.dart';
 import '../data/water_tank.dart';
+import '../services/push_service.dart';
 
 // ===== role ในระบบ =====
 // ทุกคนมี citizen (ประชาชน) เป็นพื้นฐาน role อื่นเพิ่มทีหลังได้
@@ -207,8 +208,72 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
     _loadAnnouncements();
     _loadMenuCounts();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkNotificationPermission();
+    });
+  }
+  
+  Future<void> _checkNotificationPermission() async {
+    final allowed = await PushService.isNotificationAllowed();
+
+    if (allowed || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Row(
+            children: [
+              Icon(
+                Icons.notifications_active,
+                color: AppColors.primary,
+              ),
+              SizedBox(width: 10),
+              Text('เปิดการแจ้งเตือน'),
+            ],
+          ),
+          content: const Text(
+            'กรุณาอนุญาตการแจ้งเตือน เพื่อรับประกาศและติดตามสถานะงานประปา',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+              },
+              child: const Text('ไว้ภายหลัง'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final allowed =
+                    await PushService.requestNotificationPermission();
+
+                if (!ctx.mounted) return;
+
+                Navigator.pop(ctx);
+
+                if (allowed) {
+                  // ได้รับอนุญาตแล้ว
+                  await PushService.syncToken();
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('อนุญาต'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
