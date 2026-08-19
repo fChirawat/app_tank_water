@@ -3,9 +3,14 @@
 //         -> สร้าง profile ใน PostgreSQL -> ให้ role citizen อัตโนมัติ
 //
 // เหตุผลที่แยกจาก line-login: ผู้ใช้ใหม่ต้องกรอกชื่อ/ที่อยู่ก่อน จึงสร้าง profile ได้
+//
+// ความปลอดภัย: ต้องตรวจ accessToken กับ LINE ก่อนเสมอ แล้วใช้ lineUserId
+// ที่ได้จาก LINE เอง (ไม่ใช่ค่าที่ client ส่งมา) กันคนปลอม lineUserId
+// สร้างโปรไฟล์ดักไว้ล่วงหน้าแทนคนอื่น
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
+const LINE_CHANNEL_ID = Deno.env.get('LINE_CHANNEL_ID')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -21,7 +26,7 @@ Deno.serve(async (req) => {
 
   try {
     const {
-      lineUserId,
+      accessToken,
       title,
       firstName,
       lastName,
@@ -31,9 +36,31 @@ Deno.serve(async (req) => {
     } = await req.json();
 
     // เช็คข้อมูลที่จำเป็น
-    if (!lineUserId || !firstName || !lastName) {
+    if (!accessToken || !firstName || !lastName) {
       return json({ error: 'ข้อมูลไม่ครบ' }, 400);
     }
+
+    // ===== 1) ตรวจ token กับ LINE =====
+    const verifyRes = await fetch(
+      `https://api.line.me/oauth2/v2.1/verify?access_token=${encodeURIComponent(accessToken)}`,
+    );
+    if (!verifyRes.ok) {
+      return json({ error: 'token หมดอายุ กรุณาเข้าสู่ระบบใหม่' }, 401);
+    }
+    const verifyData = await verifyRes.json();
+    if (String(verifyData.client_id) !== String(LINE_CHANNEL_ID)) {
+      return json({ error: 'token ไม่ได้มาจากแอปนี้' }, 401);
+    }
+
+    // ===== 2) ดึง lineUserId ตัวจริงจาก LINE (ไม่เชื่อค่าที่ client ส่งมา) =====
+    const profileRes = await fetch('https://api.line.me/v2/profile', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!profileRes.ok) {
+      return json({ error: 'ดึงข้อมูลผู้ใช้ไม่สำเร็จ' }, 400);
+    }
+    const lineProfile = await profileRes.json();
+    const lineUserId: string = lineProfile.userId;
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 

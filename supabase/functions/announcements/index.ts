@@ -234,6 +234,25 @@ Deno.serve(async (req) => {
         const id = body.id as string | undefined;
         if (!id) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
 
+        // เจ้าหน้าที่ลบได้เฉพาะประกาศของหมู่บ้านตัวเองเท่านั้น (กันลบประกาศหมู่บ้านอื่น/ทุกหมู่บ้าน)
+        if (!canAnnounceAll) {
+          const { data: ann } = await admin
+            .from('announcements')
+            .select('villages')
+            .eq('id', id)
+            .maybeSingle();
+
+          const annVillages = (ann?.villages as string[] | null) ?? null;
+          const isOwnVillageOnly =
+            annVillages !== null &&
+            annVillages.length === 1 &&
+            annVillages[0] === officerVillage;
+
+          if (!ann || !isOwnVillageOnly) {
+            return json({ error: 'ลบได้เฉพาะประกาศของหมู่บ้านตัวเองเท่านั้น' }, 403);
+          }
+        }
+
         const { error } = await admin
           .from('announcements')
           .delete()

@@ -140,8 +140,9 @@ class AuthService {
   }
 
   // ===== สมัครสมาชิกใหม่ (หลังกรอกข้อมูลในฟอร์ม) =====
+  // ส่ง accessToken ไปให้ server ตรวจกับ LINE เองแล้วดึง lineUserId ตัวจริงมาใช้
+  // (กันปลอม lineUserId มาสมัครแทนคนอื่น)
   static Future<LoginResultData> registerNewUser({
-    required String lineUserId,
     required String? title,
     required String firstName,
     required String lastName,
@@ -152,7 +153,7 @@ class AuthService {
     final response = await _supabase.functions.invoke(
       'line-register',
       body: {
-        'lineUserId': lineUserId,
+        'accessToken': AppSession.accessToken,
         'title': title,
         'firstName': firstName,
         'lastName': lastName,

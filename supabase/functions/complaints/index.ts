@@ -475,6 +475,9 @@ Deno.serve(async (req) => {
       case 'get-items': {
         const complaintId = body.complaintId as string | undefined;
         if (!complaintId) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
+        if (!canSeeAll) {
+          return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
+        }
 
         const { data, error } = await admin
           .from('repair_items')
@@ -527,6 +530,9 @@ Deno.serve(async (req) => {
       case 'get-logs': {
         const complaintId = body.complaintId as string | undefined;
         if (!complaintId) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
+        if (!canSeeAll) {
+          return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
+        }
 
         const { data, error } = await admin
           .from('repair_logs')
@@ -582,8 +588,23 @@ Deno.serve(async (req) => {
         if (!isVillageHead) {
           return json({ error: 'เฉพาะผู้ใหญ่บ้านเท่านั้น' }, 403);
         }
+        if (!headVillage) {
+          return json({ error: 'ยังไม่ได้กำหนดหมู่บ้านที่ดูแล' }, 400);
+        }
         const complaintId = body.complaintId as string | undefined;
         if (!complaintId) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
+
+        // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันรับเรื่องหมู่บ้านอื่น)
+        const { data: cpCheck } = await admin
+          .from('complaints')
+          .select('id, water_tanks(village)')
+          .eq('id', complaintId)
+          .maybeSingle();
+
+        const cpVillage = (cpCheck?.water_tanks as { village?: string } | null)?.village;
+        if (!cpCheck || cpVillage !== headVillage) {
+          return json({ error: 'ไม่มีสิทธิ์จัดการเรื่องนี้' }, 403);
+        }
 
         const { error } = await admin
           .from('complaints')
@@ -604,10 +625,25 @@ Deno.serve(async (req) => {
         if (!isVillageHead) {
           return json({ error: 'เฉพาะผู้ใหญ่บ้านเท่านั้น' }, 403);
         }
+        if (!headVillage) {
+          return json({ error: 'ยังไม่ได้กำหนดหมู่บ้านที่ดูแล' }, 400);
+        }
         const complaintId = body.complaintId as string | undefined;
         const decision = body.decision as string | undefined;
         if (!complaintId || !decision) {
           return json({ error: 'ข้อมูลไม่ครบ' }, 400);
+        }
+
+        // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันตัดสินงบเรื่องหมู่บ้านอื่น)
+        const { data: cpCheck } = await admin
+          .from('complaints')
+          .select('id, water_tanks(village)')
+          .eq('id', complaintId)
+          .maybeSingle();
+
+        const cpVillage = (cpCheck?.water_tanks as { village?: string } | null)?.village;
+        if (!cpCheck || cpVillage !== headVillage) {
+          return json({ error: 'ไม่มีสิทธิ์จัดการเรื่องนี้' }, 403);
         }
 
         if (decision === 'approve') {

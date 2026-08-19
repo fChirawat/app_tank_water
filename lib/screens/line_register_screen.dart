@@ -60,7 +60,6 @@ class _LineRegisterScreenState extends State<LineRegisterScreen> {
 
     try {
       final result = await AuthService.registerNewUser(
-        lineUserId: widget.lineUserId,
         title: _selectedTitle,
         firstName: _firstNameController.text.trim(),
         lastName: _lastNameController.text.trim(),
