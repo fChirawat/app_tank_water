@@ -123,8 +123,8 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
 
-    // กันคนนอกยิงเล่น
-    if (PUSH_SECRET && body.secret !== PUSH_SECRET) {
+    // กันคนนอกยิงเล่น — ต้องตั้ง PUSH_SECRET ไว้เสมอ ถ้ายังไม่ตั้งค่าให้ปฏิเสธไปเลย (fail-closed)
+    if (!PUSH_SECRET || body.secret !== PUSH_SECRET) {
       return json({ error: 'ไม่มีสิทธิ์เรียกใช้' }, 403);
     }
 

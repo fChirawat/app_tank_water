@@ -35,9 +35,18 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
     _loadTanks();
   }
 
-  // หาชื่อหมู่บ้านของผู้ใช้จากโปรไฟล์
+  // หาหมู่บ้าน default ให้ตรงกับบทบาท
+  // - ผู้ใหญ่บ้าน/เจ้าหน้าที่หมู่บ้าน -> หมู่บ้านที่ตัวเอง "ดูแล" (อาจไม่ใช่หมู่บ้านที่อยู่)
+  // - ประชาชน/เจ้าหน้าที่เทศบาล -> หมู่บ้านที่อยู่อาศัยจากโปรไฟล์
   // โปรไฟล์เก็บเป็น "หมู่ 1 บุญเรืองเหนือ" -> ตัดเอาแค่ชื่อหมู่บ้าน
   String? _myVillage() {
+    if (AppSession.isOfficer && AppSession.officerVillage != null) {
+      return AppSession.officerVillage;
+    }
+    if (AppSession.isVillageHead && AppSession.headVillage != null) {
+      return AppSession.headVillage;
+    }
+
     final v = AppSession.profile?['village'] as String?;
     if (v == null || v.isEmpty) return null;
     for (final name in kVillages) {
@@ -223,6 +232,10 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
 
   // เจ้าหน้าที่เท่านั้นที่แก้ไข/ลบ/เพิ่มได้ (ประชาชนดูอย่างเดียว)
   bool get _canEdit => AppSession.isOfficer;
+
+  // แก้ไข/ลบได้เฉพาะแทงค์ในหมู่บ้านที่ตัวเองดูแลเท่านั้น (กันเห็นปุ่มของหมู่บ้านอื่น)
+  bool _canEditTank(WaterTank tank) =>
+      AppSession.isOfficer && tank.village == AppSession.officerVillage;
 
   // เปิดหน้าแก้ไขแทงค์ แล้วโหลดรายการใหม่ถ้าแก้สำเร็จ
   Future<void> _openEdit(WaterTank tank) async {
@@ -433,7 +446,7 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
                   onTap: () => _showDetail(tank),
                 ),
               ),
-              if (_canEdit) ...[
+              if (_canEditTank(tank)) ...[
                 const SizedBox(width: 8),
                 Expanded(
                   child: _smallButton(

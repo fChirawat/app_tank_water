@@ -489,3 +489,10 @@ entrypoint = "./functions/announcements/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/announcements/*.html" ]
+
+[functions.push-send]
+enabled = true
+# ฟังก์ชันนี้ถูกเรียกจากฟังก์ชันอื่นแบบ server-to-server (ไม่มี Authorization header)
+# และมีการป้องกันด้วย PUSH_SECRET อยู่แล้วในตัวโค้ด จึงปิด verify_jwt เหมือนฟังก์ชันอื่นๆ
+verify_jwt = false
+entrypoint = "./functions/push-send/index.ts"

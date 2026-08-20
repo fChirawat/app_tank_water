@@ -33,8 +33,17 @@ class _TankStatusScreenState extends State<TankStatusScreen> {
     _load();
   }
 
-  // หาชื่อหมู่บ้านของผู้ใช้จากโปรไฟล์
+  // หาหมู่บ้าน default ให้ตรงกับบทบาท
+  // - ผู้ใหญ่บ้าน/เจ้าหน้าที่หมู่บ้าน -> หมู่บ้านที่ตัวเอง "ดูแล" (อาจไม่ใช่หมู่บ้านที่อยู่)
+  // - ประชาชน/เจ้าหน้าที่เทศบาล -> หมู่บ้านที่อยู่อาศัยจากโปรไฟล์
   String? _myVillage() {
+    if (AppSession.isOfficer && AppSession.officerVillage != null) {
+      return AppSession.officerVillage;
+    }
+    if (AppSession.isVillageHead && AppSession.headVillage != null) {
+      return AppSession.headVillage;
+    }
+
     final v = AppSession.profile?['village'] as String?;
     if (v == null || v.isEmpty) return null;
     // โปรไฟล์เก็บเป็น "หมู่ 3 บ้านซาววา" -> เทียบกับ kVillages หาชื่อที่ตรง
@@ -102,9 +111,12 @@ class _TankStatusScreenState extends State<TankStatusScreen> {
                     const SizedBox(height: 10),
                     _buildVillageDropdown(),
                     const SizedBox(height: 6),
-                    const Text(
-                      'ค่าเริ่มต้นคือหมู่บ้านที่คุณลงทะเบียนไว้',
-                      style: TextStyle(color: AppColors.textGrey, fontSize: 12),
+                    Text(
+                      (AppSession.isOfficer || AppSession.isVillageHead)
+                          ? 'ค่าเริ่มต้นคือหมู่บ้านที่คุณดูแล'
+                          : 'ค่าเริ่มต้นคือหมู่บ้านที่คุณลงทะเบียนไว้',
+                      style: const TextStyle(
+                          color: AppColors.textGrey, fontSize: 12),
                     ),
                     const SizedBox(height: 16),
                     Expanded(child: _buildList()),

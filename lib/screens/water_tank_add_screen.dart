@@ -53,6 +53,18 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
     // โหมดแก้ไข -> เติมข้อมูลเดิมลงฟอร์ม
     final t = widget.tank;
     if (t != null) {
+      // เจ้าหน้าที่หมู่บ้าน (ไม่ใช่เทศบาล/แอดมิน) แก้ได้เฉพาะแทงค์ในหมู่บ้าน
+      // ตัวเองเท่านั้น — ถ้าหลุดเข้ามาแก้แทงค์หมู่บ้านอื่นได้ (เช่นจากลิงก์เก่า)
+      // ให้เตะออกทันที กันฟอร์มโชว์ค่าหมู่บ้านผิด (ล็อกช่องเป็นหมู่บ้านของแทงค์
+      // แทนที่จะเป็นหมู่บ้านที่ตัวเองดูแลจริง ทำให้บันทึกไปเซิร์ฟเวอร์ก็ปฏิเสธอยู่ดี
+      // แต่ผู้ใช้จะงงว่าทำไมกดบันทึกไม่ผ่าน)
+      if (_lockVillage && t.village != AppSession.officerVillage) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          AppDialog.error(context, 'แก้ไขได้เฉพาะแทงค์น้ำในหมู่บ้านที่ดูแลเท่านั้น');
+          Navigator.pop(context);
+        });
+      }
       _nameController.text = t.name;
       _detailController.text = t.detail ?? '';
       _capacityController.text =

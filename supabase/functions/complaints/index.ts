@@ -311,22 +311,31 @@ Deno.serve(async (req) => {
 
       // เจ้าหน้าที่เดินสถานะไปทีละสเต็ป (ข้ามไม่ได้)
       case 'advance-status': {
-        if (!canSeeAll) {
+        if (!isOfficer) {
           return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
         }
 
         const complaintId = body.complaintId as string | undefined;
         if (!complaintId) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
 
-        // ดึงสถานะปัจจุบันก่อน
+        // ดึงสถานะปัจจุบัน + หมู่บ้านของแทงค์ก่อน
         const { data: current, error: fetchErr } = await admin
           .from('complaints')
-          .select('status')
+          .select('status, water_tanks(village)')
           .eq('id', complaintId)
           .single();
 
         if (fetchErr || !current) {
           return json({ error: 'ไม่พบเรื่องร้องเรียน' }, 404);
+        }
+
+        // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันเดินสถานะเรื่องหมู่บ้านอื่น)
+        const curTank = current.water_tanks as { village?: string } | null;
+        if (!officerVillage || curTank?.village !== officerVillage) {
+          return json(
+            { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
+            403,
+          );
         }
 
         // สเต็ปถัดไปของแต่ละสถานะ (เจ้าหน้าที่เดินได้ถึงแค่ budget_wait)
@@ -429,7 +438,7 @@ Deno.serve(async (req) => {
 
       // บันทึกรายการวัสดุ (เจ้าหน้าที่ กรอกตอนลงพื้นที่ประเมิน)
       case 'save-items': {
-        if (!canSeeAll) {
+        if (!isOfficer) {
           return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
         }
         const complaintId = body.complaintId as string | undefined;
@@ -443,6 +452,21 @@ Deno.serve(async (req) => {
         const detail = (body.detail as string | undefined) ?? null;
 
         if (!complaintId || !items) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
+
+        // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันแก้วัสดุเรื่องหมู่บ้านอื่น)
+        const { data: itemsCpCheck } = await admin
+          .from('complaints')
+          .select('id, water_tanks(village)')
+          .eq('id', complaintId)
+          .maybeSingle();
+        const itemsCpVillage =
+          (itemsCpCheck?.water_tanks as { village?: string } | null)?.village;
+        if (!itemsCpCheck || !officerVillage || itemsCpVillage !== officerVillage) {
+          return json(
+            { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
+            403,
+          );
+        }
 
         // เก็บวัตถุประสงค์ + ประเภท/รายละเอียดที่เจ้าหน้าที่แก้ให้ตรงหน้างาน
         const updateData: Record<string, unknown> = { survey_note: surveyNote };
@@ -479,6 +503,23 @@ Deno.serve(async (req) => {
           return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
         }
 
+        // ปลัดดูได้ทุกหมู่บ้าน / เจ้าหน้าที่-ผู้ใหญ่บ้านดูได้เฉพาะหมู่บ้านที่ดูแล
+        if (!isPalad) {
+          const { data: getItemsCpCheck } = await admin
+            .from('complaints')
+            .select('id, water_tanks(village)')
+            .eq('id', complaintId)
+            .maybeSingle();
+          const getItemsCpVillage =
+            (getItemsCpCheck?.water_tanks as { village?: string } | null)?.village;
+          const allowed =
+            (isOfficer && getItemsCpVillage === officerVillage) ||
+            (isVillageHead && getItemsCpVillage === headVillage);
+          if (!getItemsCpCheck || !allowed) {
+            return json({ error: 'ไม่มีสิทธิ์ดูข้อมูลนี้' }, 403);
+          }
+        }
+
         const { data, error } = await admin
           .from('repair_items')
           .select('*')
@@ -505,7 +546,7 @@ Deno.serve(async (req) => {
 
       // บันทึกความคืบหน้าการซ่อม (ตอนซ่อมไม่เสร็จในวันเดียว)
       case 'add-log': {
-        if (!canSeeAll) {
+        if (!isOfficer) {
           return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
         }
         const complaintId = body.complaintId as string | undefined;
@@ -513,6 +554,21 @@ Deno.serve(async (req) => {
 
         if (!complaintId || note.length === 0) {
           return json({ error: 'กรุณากรอกรายละเอียด' }, 400);
+        }
+
+        // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันบันทึกเรื่องหมู่บ้านอื่น)
+        const { data: addLogCpCheck } = await admin
+          .from('complaints')
+          .select('id, water_tanks(village)')
+          .eq('id', complaintId)
+          .maybeSingle();
+        const addLogCpVillage =
+          (addLogCpCheck?.water_tanks as { village?: string } | null)?.village;
+        if (!addLogCpCheck || !officerVillage || addLogCpVillage !== officerVillage) {
+          return json(
+            { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
+            403,
+          );
         }
 
         const { error } = await admin.from('repair_logs').insert({
@@ -530,8 +586,20 @@ Deno.serve(async (req) => {
       case 'get-logs': {
         const complaintId = body.complaintId as string | undefined;
         if (!complaintId) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
-        if (!canSeeAll) {
+        if (!isOfficer) {
           return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
+        }
+
+        // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันดูประวัติเรื่องหมู่บ้านอื่น)
+        const { data: getLogsCpCheck } = await admin
+          .from('complaints')
+          .select('id, water_tanks(village)')
+          .eq('id', complaintId)
+          .maybeSingle();
+        const getLogsCpVillage =
+          (getLogsCpCheck?.water_tanks as { village?: string } | null)?.village;
+        if (!getLogsCpCheck || !officerVillage || getLogsCpVillage !== officerVillage) {
+          return json({ error: 'ไม่มีสิทธิ์ดูข้อมูลนี้' }, 403);
         }
 
         const { data, error } = await admin

@@ -23,6 +23,7 @@ class AppSession {
   static bool get isLoggedIn => accessToken != null;
 
   static bool get isOfficer => roles.contains('officer');
+  static bool get isVillageHead => roles.contains('village_head');
   static bool get isPalad => roles.contains('palad'); // เจ้าหน้าที่เทศบาล
   static bool get isAdmin => roles.contains('admin');
   // ประกาศได้ทุกหมู่บ้าน = เทศบาล หรือ แอดมิน
