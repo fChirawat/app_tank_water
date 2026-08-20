@@ -3,7 +3,9 @@ import 'package:flutter/cupertino.dart';
 import '../data/villages.dart';
 import '../services/session.dart';
 import '../services/announcement_service.dart';
+import '../services/feature_unlock_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/addon_lock_prompt.dart';
 import '../widgets/app_dialog.dart';
 
 // หน้าเจ้าหน้าที่สร้างประกาศ
@@ -28,6 +30,21 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
 
   bool _saving = false;
 
+  // ฟีเจอร์เสริม: ตั้งเวลาส่งแจ้งเตือนล่วงหน้า
+  bool _scheduleUnlocked = false;
+  bool _scheduleSend = false;
+  DateTime? _pushDate;
+  TimeOfDay? _pushTime;
+
+  @override
+  void initState() {
+    super.initState();
+    FeatureUnlockService.isUnlocked('scheduled_announcement').then((v) {
+      if (!mounted) return;
+      setState(() => _scheduleUnlocked = v);
+    });
+  }
+
   @override
   void dispose() {
     _titleCtrl.dispose();
@@ -48,10 +65,48 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
 
   Future<void> _pickTime(bool isStart) async {
     final current = (isStart ? _start : _end) ?? TimeOfDay.now();
+    final picked = await _pickTimeOfDay(
+      current,
+      label: isStart ? 'เวลาเริ่ม' : 'เวลาสิ้นสุด',
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isStart) {
+        _start = picked;
+      } else {
+        _end = picked;
+      }
+    });
+  }
+
+  // เลือกวันที่ต้องการให้ระบบส่งแจ้งเตือน (ฟีเจอร์เสริม)
+  Future<void> _pickPushDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _pushDate ?? now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (picked != null) setState(() => _pushDate = picked);
+  }
+
+  // เลือกเวลาที่ต้องการให้ระบบส่งแจ้งเตือน (ฟีเจอร์เสริม)
+  Future<void> _pickPushTime() async {
+    final current = _pushTime ?? TimeOfDay.now();
+    final picked = await _pickTimeOfDay(current, label: 'เวลาส่งแจ้งเตือน');
+    if (picked != null) setState(() => _pushTime = picked);
+  }
+
+  // ล้อเลือกชั่วโมง:นาที ใช้ร่วมกันได้ทั้งเวลาเริ่ม/สิ้นสุด/เวลาส่งแจ้งเตือน
+  Future<TimeOfDay?> _pickTimeOfDay(
+    TimeOfDay current, {
+    required String label,
+  }) async {
     int hour = current.hour;
     int minute = current.minute;
 
-    final picked = await showModalBottomSheet<TimeOfDay>(
+    return showModalBottomSheet<TimeOfDay>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
@@ -73,7 +128,7 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
                       child: const Text('ยกเลิก',
                           style: TextStyle(color: AppColors.textGrey)),
                     ),
-                    Text(isStart ? 'เวลาเริ่ม' : 'เวลาสิ้นสุด',
+                    Text(label,
                         style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -141,16 +196,6 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
         );
       },
     );
-
-    if (picked != null) {
-      setState(() {
-        if (isStart) {
-          _start = picked;
-        } else {
-          _end = picked;
-        }
-      });
-    }
   }
 
   String _fmtTime(TimeOfDay t) =>
@@ -166,6 +211,27 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
       return;
     }
 
+    // ฟีเจอร์เสริม: ตั้งเวลาส่งล่วงหน้า — ต้องกรอกวัน+เวลาให้ครบ
+    // และต้องเป็นเวลาในอนาคตเท่านั้น
+    DateTime? pushScheduledAt;
+    if (_scheduleUnlocked && _scheduleSend) {
+      if (_pushDate == null || _pushTime == null) {
+        _toast('กรุณาเลือกวันและเวลาที่จะส่งแจ้งเตือน');
+        return;
+      }
+      pushScheduledAt = DateTime(
+        _pushDate!.year,
+        _pushDate!.month,
+        _pushDate!.day,
+        _pushTime!.hour,
+        _pushTime!.minute,
+      );
+      if (!pushScheduledAt.isAfter(DateTime.now())) {
+        _toast('เวลาที่จะส่งแจ้งเตือนต้องเป็นเวลาในอนาคต');
+        return;
+      }
+    }
+
     setState(() => _saving = true);
     try {
       await AnnouncementService.create(
@@ -178,6 +244,7 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
         endTime: _end != null ? _fmtTime(_end!) : null,
         // เทศบาล/แอดมิน ส่งที่เลือก / เจ้าหน้าที่หมู่บ้าน ส่งว่าง (server บังคับหมู่ตัวเอง)
         villages: AppSession.canAnnounceAll ? _villages.toList() : [],
+        pushScheduledAt: pushScheduledAt,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -189,6 +256,98 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
   }
 
   void _toast(String m) => AppDialog.warn(context, m);
+
+  // ===== ฟีเจอร์เสริม: ตั้งเวลาส่งแจ้งเตือนล่วงหน้า =====
+  Widget _buildScheduleSection() {
+    if (!_scheduleUnlocked) {
+      return GestureDetector(
+        onTap: () async {
+          final ok = await ensureFeatureUnlocked(
+              context, 'scheduled_announcement', 'ตั้งเวลาส่งประกาศล่วงหน้า');
+          if (ok && mounted) setState(() => _scheduleUnlocked = true);
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFAFAFC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.lock_outline,
+                  size: 18, color: AppColors.textGrey),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'ตั้งเวลาส่งแจ้งเตือนล่วงหน้า (ฟีเจอร์เสริม)',
+                  style: TextStyle(color: AppColors.textGrey, fontSize: 13),
+                ),
+              ),
+              const Text('ปลดล็อก',
+                  style: TextStyle(
+                      color: AppColors.primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'ตั้งเวลาส่งแจ้งเตือนล่วงหน้า',
+                style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textDark),
+              ),
+            ),
+            Switch(
+              value: _scheduleSend,
+              activeThumbColor: AppColors.primary,
+              onChanged: (v) => setState(() => _scheduleSend = v),
+            ),
+          ],
+        ),
+        if (_scheduleSend) ...[
+          const SizedBox(height: 4),
+          const Text(
+            'ถ้าไม่ตั้งเวลา ระบบจะส่งแจ้งเตือนทันทีตอนกดประกาศ',
+            style: TextStyle(color: AppColors.textGrey, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _pickerBox(
+                  _pushDate == null ? 'วันที่จะส่ง' : _fmtDate(_pushDate!),
+                  Icons.calendar_today,
+                  _pickPushDate,
+                  filled: _pushDate != null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _pickerBox(
+                  _pushTime == null ? 'เวลาที่จะส่ง' : _fmtTime(_pushTime!),
+                  Icons.access_time,
+                  _pickPushTime,
+                  filled: _pushTime != null,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -256,6 +415,8 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 16),
+                    _buildScheduleSection(),
                     const SizedBox(height: 16),
                     _label('แจ้งให้'),
                     // เทศบาล/แอดมิน เลือกหมู่บ้านได้ / เจ้าหน้าที่หมู่บ้าน = หมู่ตัวเอง

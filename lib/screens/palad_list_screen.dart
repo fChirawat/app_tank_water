@@ -3,8 +3,9 @@ import 'package:printing/printing.dart';
 import '../data/complaint.dart';
 import '../data/repair.dart';
 import '../services/complaint_service.dart';
-import '../services/session.dart';
 import '../services/request_pdf_service.dart';
+import '../services/pdf_signer_prefs.dart';
+import '../services/feature_unlock_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_dialog.dart';
 import '../widgets/image_gallery.dart';
@@ -260,20 +261,25 @@ class _PaladDetailState extends State<_PaladDetail> {
 
   // สร้างใบคำร้อง PDF แล้วเปิด preview (เซฟ/แชร์ได้จากหน้า preview)
   Future<void> _makePdf() async {
+    // ฟีเจอร์กำหนดชื่อ/ตำแหน่งผู้ลงนามเอง — ต้องปลดล็อกก่อนถึงจะถาม
+    // ยังไม่ปลดล็อก -> ใช้ค่าเริ่มต้นเหมือนเดิมทุกครั้ง ไม่ถามอะไร
+    String? signerName;
+    String? signerPosition;
+
+    if (await FeatureUnlockService.isUnlocked('pdf_signer')) {
+      final signer = await _askSignerInfo();
+      if (signer == null) return; // ผู้ใช้กดยกเลิก
+      signerName = signer.$1;
+      signerPosition = signer.$2;
+    }
+
     setState(() => _makingPdf = true);
     try {
-      // ชื่อเจ้าหน้าที่เทศบาลที่กดสร้าง (ผู้ยื่นคำร้อง)
-      final p = AppSession.profile;
-      final name = [
-        (p?['title'] as String?) ?? '',
-        (p?['first_name'] as String?) ?? '',
-        (p?['last_name'] as String?) ?? '',
-      ].where((s) => s.isNotEmpty).join(' ');
-
       final bytes = await RequestPdfService.build(
         complaint: widget.complaint,
         items: _items,
-        officerName: name.isEmpty ? '-' : name,
+        signerName: signerName,
+        signerPosition: signerPosition,
       );
       if (!mounted) return;
       setState(() => _makingPdf = false);
@@ -283,6 +289,142 @@ class _PaladDetailState extends State<_PaladDetail> {
       if (!mounted) return;
       setState(() => _makingPdf = false);
       AppDialog.error(context, 'สร้าง PDF ไม่สำเร็จ');
+    }
+  }
+
+  // ถามว่าจะใช้ชื่อ/ตำแหน่งผู้ลงนามล่าสุดไหม ถ้าไม่ใช้ -> ให้กรอกใหม่
+  // คืน null = ผู้ใช้ยกเลิก
+  Future<(String, String)?> _askSignerInfo() async {
+    final lastName = await PdfSignerPrefs.lastName();
+    final lastPosition = await PdfSignerPrefs.lastPosition();
+
+    if (lastName != null &&
+        lastName.isNotEmpty &&
+        lastPosition != null &&
+        lastPosition.isNotEmpty) {
+      if (!mounted) return null;
+      final useLast = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('ใช้ชื่อผู้ลงนามเดิมไหม?'),
+          content: Text(
+            '$lastName\n$lastPosition',
+            style: const TextStyle(fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('กรอกใหม่',
+                  style: TextStyle(color: AppColors.textGrey)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('ใช้ชื่อนี้'),
+            ),
+          ],
+        ),
+      );
+      if (useLast == null) return null; // ปิด dialog เฉยๆ = ยกเลิก
+      if (useLast) return (lastName, lastPosition);
+    }
+
+    if (!mounted) return null;
+    final entered = await _showSignerForm(
+      initialName: lastName ?? '',
+      initialPosition: lastPosition ?? '',
+    );
+    if (entered == null) return null;
+    await PdfSignerPrefs.saveSigner(entered.$1, entered.$2);
+    return entered;
+  }
+
+  // ฟอร์มกรอกชื่อ + ตำแหน่งผู้ลงนามใหม่
+  static const List<String> _signerTitleOptions = ['นาย', 'นาง', 'นางสาว'];
+
+  Future<(String, String)?> _showSignerForm({
+    required String initialName,
+    required String initialPosition,
+  }) async {
+    // แยกคำนำหน้าออกจากชื่อเดิม (ถ้ามี) ไว้เติมในดรอปดาวน์
+    String? initialTitle;
+    var initialNameOnly = initialName;
+    for (final t in _signerTitleOptions) {
+      if (initialName.startsWith(t)) {
+        initialTitle = t;
+        initialNameOnly = initialName.substring(t.length).trim();
+        break;
+      }
+    }
+
+    String? selectedTitle = initialTitle;
+    final nameCtrl = TextEditingController(text: initialNameOnly);
+    final positionCtrl = TextEditingController(text: initialPosition);
+    try {
+      return await showDialog<(String, String)>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: const Text('กรอกชื่อ/ตำแหน่งผู้ลงนาม'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: selectedTitle,
+                  decoration: const InputDecoration(labelText: 'คำนำหน้า'),
+                  hint: const Text('เลือกคำนำหน้า'),
+                  items: _signerTitleOptions
+                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                      .toList(),
+                  onChanged: (v) => setDialogState(() => selectedTitle = v),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'ชื่อ-สกุล'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: positionCtrl,
+                  decoration: const InputDecoration(labelText: 'ตำแหน่ง'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('ยกเลิก',
+                    style: TextStyle(color: AppColors.textGrey)),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  final name = nameCtrl.text.trim();
+                  final position = positionCtrl.text.trim();
+                  if (name.isEmpty || position.isEmpty) return;
+                  final fullName =
+                      selectedTitle == null ? name : '$selectedTitle$name';
+                  Navigator.pop(ctx, (fullName, position));
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('ตกลง'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      nameCtrl.dispose();
+      positionCtrl.dispose();
     }
   }
 

@@ -3,6 +3,7 @@ import '../data/villages.dart';
 import '../services/admin_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_dialog.dart';
+import 'addon_features_screen.dart';
 
 // หน้าจัดการผู้ใช้ (เฉพาะ admin)
 // ค้นหาแยก คำนำหน้า/ชื่อ/สกุล + แบ่งหน้าทีละ 10 คน
@@ -189,7 +190,21 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
               ],
             ),
           ),
-          const SizedBox(width: 44),
+          GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AddonFeaturesScreen()),
+            ),
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.22),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock_open, color: Colors.white),
+            ),
+          ),
         ],
       ),
     );

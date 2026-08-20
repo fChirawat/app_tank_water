@@ -12,10 +12,16 @@ import '../data/repair.dart';
 class RequestPdfService {
   static final HtmlToPdfConverter _converter = HtmlToPdfConverter();
 
+  // ค่าเริ่มต้นของผู้ลงนาม (ใช้ตอนไม่ได้ระบุ signerName/signerPosition มา)
+  static const String _defaultSignerName = 'นายธนศักดิ์ แอ่นปัญญา';
+  static const String _defaultSignerPosition = 'นายกเทศมนตรีตำบลบุญเรือง';
+
   static Future<Uint8List> build({
     required Complaint complaint,
     required List<RepairItem> items,
-    required String officerName,
+    // ชื่อ/ตำแหน่งผู้ลงนาม — ไม่ระบุ = ใช้ค่าเริ่มต้น (ฟีเจอร์กำหนดเองต้องปลดล็อกก่อน)
+    String? signerName,
+    String? signerPosition,
   }) async {
     final problemType = complaint.problemType.trim();
     final detail = (complaint.detail ?? '').trim();
@@ -26,7 +32,13 @@ class RequestPdfService {
     final moo = complaint.tankMoo?.toString().trim() ?? '';
     final village = (complaint.tankVillage ?? '').trim();
     final purpose = (complaint.surveyNote ?? '').trim();
-    final formattedOfficerName = _formatOfficerName(officerName);
+    final formattedSignerName = (signerName == null || signerName.trim().isEmpty)
+        ? _defaultSignerName
+        : _formatOfficerName(signerName);
+    final formattedSignerPosition =
+        (signerPosition == null || signerPosition.trim().isEmpty)
+            ? _defaultSignerPosition
+            : signerPosition.trim();
 
     final total = items.fold<double>(
       0,
@@ -51,7 +63,8 @@ class RequestPdfService {
       moo: moo,
       village: village,
       purpose: purpose,
-      officerName: formattedOfficerName,
+      signerName: formattedSignerName,
+      signerPosition: formattedSignerPosition,
       images: imageDataUrls,
       items: items,
       total: total,
@@ -73,7 +86,8 @@ class RequestPdfService {
     required String moo,
     required String village,
     required String purpose,
-    required String officerName,
+    required String signerName,
+    required String signerPosition,
     required List<String> images,
     required List<RepairItem> items,
     required double total,
@@ -465,8 +479,8 @@ class RequestPdfService {
     <div>ขอแสดงความนับถือ</div>
     <div class="signature-space"></div>
     <div class="signature-line">ลงชื่อ ...........................</div>
-    <div>(นายธนศักดิ์ แอ่นปัญญา)</div>
-    <div>นายกเทศมนตรีตำบลบุญเรือง</div>
+    <div>(${_escapeHtml(signerName)})</div>
+    <div>${_escapeHtml(signerPosition)}</div>
   </div>
 </body>
 </html>

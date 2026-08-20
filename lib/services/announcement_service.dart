@@ -14,6 +14,8 @@ class AnnouncementService {
     String? startTime,
     String? endTime,
     List<String> villages = const [], // ว่าง = ทุกหมู่บ้าน
+    // ฟีเจอร์เสริม: ตั้งเวลาส่ง push ล่วงหน้า — ไม่ระบุ = ส่งทันที
+    DateTime? pushScheduledAt,
   }) async {
     final response = await _supabase.functions.invoke(
       'announcements',
@@ -28,6 +30,7 @@ class AnnouncementService {
           'startTime': startTime,
           'endTime': endTime,
           'villages': villages,
+          'pushScheduledAt': pushScheduledAt?.toIso8601String(),
         },
       },
     );

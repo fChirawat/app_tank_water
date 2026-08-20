@@ -11,6 +11,17 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const LINE_CHANNEL_ID = Deno.env.get('LINE_CHANNEL_ID')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+// รหัสปลดล็อกฟีเจอร์เสริมแต่ละตัว — เก็บเป็น secret ฝั่งเซิร์ฟเวอร์เท่านั้น
+// ไม่เคยถูกส่งลงไปอยู่ในตัวแอป กันคนแกะแอปเจอรหัส
+// เพิ่มฟีเจอร์ใหม่ -> เพิ่ม secret ใหม่ + เพิ่มบรรทัดในนี้ (id ต้องตรงกับ
+// kAddonFeatures ฝั่งแอปที่ lib/data/addon_feature.dart)
+const FEATURE_UNLOCK_CODES: Record<string, string> = {
+  'pdf_signer': Deno.env.get('PDF_SIGNER_UNLOCK_CODE') ?? '',
+  'dashboard_print': Deno.env.get('DASHBOARD_PRINT_UNLOCK_CODE') ?? '',
+  'dashboard_compare': Deno.env.get('DASHBOARD_COMPARE_UNLOCK_CODE') ?? '',
+  'scheduled_announcement':
+    Deno.env.get('SCHEDULED_ANNOUNCEMENT_UNLOCK_CODE') ?? '',
+};
 
 // role ที่ admin แต่งตั้งให้คนอื่นได้ (ไม่รวม admin, citizen)
 const ASSIGNABLE_ROLES = ['officer', 'village_head', 'palad'];
@@ -261,6 +272,20 @@ Deno.serve(async (req) => {
           return json({ error: 'ลบสิทธิ์ไม่สำเร็จ', detail: error.message }, 500);
         }
 
+        return json({ success: true });
+      }
+
+      // ===== เช็ครหัสปลดล็อกฟีเจอร์เสริม (ระบุ featureId ว่าจะปลดล็อกตัวไหน) =====
+      // มาถึงตรงนี้ได้แปลว่าเป็น admin แล้ว (เช็คไว้ก่อนหน้าแล้ว)
+      // รหัสจริงเก็บเป็น secret ฝั่งเซิร์ฟเวอร์เท่านั้น ไม่เคยส่งไปให้แอป
+      case 'verify-feature-unlock': {
+        const featureId = (body.featureId as string | undefined) ?? '';
+        const code = (body.code as string | undefined) ?? '';
+        const expected = FEATURE_UNLOCK_CODES[featureId] ?? '';
+        const ok = expected.length > 0 && code === expected;
+        if (!ok) {
+          return json({ error: 'รหัสไม่ถูกต้อง' }, 403);
+        }
         return json({ success: true });
       }
 

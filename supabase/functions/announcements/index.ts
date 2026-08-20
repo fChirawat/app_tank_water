@@ -89,12 +89,11 @@ Deno.serve(async (req) => {
     const roles = (roleRows ?? []).map((r) => r.role);
     const isOfficer = roles.includes('officer');
     const isPalad = roles.includes('palad'); // เจ้าหน้าที่เทศบาล
-    const isAdmin = roles.includes('admin');
     // หมู่บ้านที่เจ้าหน้าที่ดูแล
     const officerRow = (roleRows ?? []).find((r) => r.role === 'officer');
     const officerVillage = (officerRow?.village as string | undefined) ?? null;
-    // ประกาศทั้งจังหวัด/ทุกหมู่บ้านได้ = เทศบาล หรือ แอดมิน
-    const canAnnounceAll = isPalad || isAdmin;
+    // ประกาศได้ทุกหมู่บ้าน = เทศบาลเท่านั้น (แอดมินดูแลระบบ ไม่ใช่คนออกประกาศ)
+    const canAnnounceAll = isPalad;
 
     switch (action) {
       // เจ้าหน้าที่สร้างประกาศ
@@ -111,11 +110,22 @@ Deno.serve(async (req) => {
           startTime?: string; // HH:mm
           endTime?: string;
           villages?: string[] | null; // ว่าง/null = ทุกหมู่บ้าน
+          // ฟีเจอร์เสริม: ตั้งเวลาส่ง push ล่วงหน้า (ISO string, อนาคต) —
+          // ไม่ระบุ/อดีต = ส่งทันทีเหมือนเดิม
+          pushScheduledAt?: string | null;
         } | undefined;
 
         if (!a?.title || !a.eventDate) {
           return json({ error: 'กรุณากรอกเรื่องและวันที่' }, 400);
         }
+
+        // ตั้งเวลาส่งล่วงหน้าไหม (ต้องเป็นเวลาในอนาคตเท่านั้น)
+        const scheduledDate = a.pushScheduledAt
+          ? new Date(a.pushScheduledAt)
+          : null;
+        const isScheduled = scheduledDate !== null &&
+          !isNaN(scheduledDate.getTime()) &&
+          scheduledDate.getTime() > Date.now();
 
         // ===== กำหนดหมู่บ้านที่ประกาศได้ ตามสิทธิ์ =====
         let finalVillages: string[] | null;
@@ -142,6 +152,9 @@ Deno.serve(async (req) => {
             end_time: a.endTime ?? null,
             villages: finalVillages,
             created_by: profile.id,
+            // ตั้งเวลาส่งล่วงหน้า -> ยังไม่ส่งตอนนี้ (ให้ cron job ส่งทีหลัง)
+            push_scheduled_at: isScheduled ? a.pushScheduledAt : null,
+            push_sent: !isScheduled,
           })
           .select()
           .single();
@@ -149,7 +162,13 @@ Deno.serve(async (req) => {
         if (error) {
           return json({ error: 'สร้างประกาศไม่สำเร็จ', detail: error.message }, 500);
         }
-        // ===== แจ้งเตือนชาวบ้านที่เกี่ยวข้อง =====
+
+        // ตั้งเวลาไว้ล่วงหน้า -> ยังไม่ส่ง push ตอนนี้ ให้ cron job จัดการทีหลัง
+        if (isScheduled) {
+          return json({ success: true, announcement: data });
+        }
+
+        // ===== แจ้งเตือนชาวบ้านที่เกี่ยวข้อง (ส่งทันที) =====
         const targetVillages = finalVillages; // null = ทุกหมู่บ้าน
 
         // หาคนที่ต้องแจ้ง (ดูจากหมู่บ้านในโปรไฟล์)
@@ -205,15 +224,15 @@ Deno.serve(async (req) => {
           .order('event_date', { ascending: true })
           .order('start_time', { ascending: true });
 
-        // เจ้าหน้าที่เห็นทุกประกาศ, ประชาชนเห็นเฉพาะหมู่บ้านตัวเอง + ทุกหมู่บ้าน
+        // เจ้าหน้าที่/เทศบาล/แอดมิน เห็นทุกประกาศ, ประชาชนเห็นเฉพาะหมู่บ้านตัวเอง + ทุกหมู่บ้าน
         const { data, error } = await query;
         if (error) {
           return json({ error: 'โหลดข้อมูลไม่สำเร็จ', detail: error.message }, 500);
         }
 
-        // กรองหมู่บ้าน (ถ้าไม่ใช่เจ้าหน้าที่)
+        // กรองหมู่บ้าน (ถ้าไม่ใช่เจ้าหน้าที่/เทศบาล/แอดมิน)
         let result = data ?? [];
-        if (!isOfficer) {
+        if (!isOfficer && !canAnnounceAll) {
           result = result.filter((row) => {
             const list = row.villages as string[] | null;
             // ไม่ระบุหมู่บ้าน = ประกาศถึงทุกหมู่บ้าน

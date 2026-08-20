@@ -496,3 +496,10 @@ enabled = true
 # และมีการป้องกันด้วย PUSH_SECRET อยู่แล้วในตัวโค้ด จึงปิด verify_jwt เหมือนฟังก์ชันอื่นๆ
 verify_jwt = false
 entrypoint = "./functions/push-send/index.ts"
+
+[functions.send-scheduled-announcements]
+enabled = true
+# เรียกโดย pg_cron ผ่าน pg_net (ไม่มี Authorization header) ป้องกันด้วย
+# SCHEDULER_SECRET ในตัวโค้ดแทน จึงปิด verify_jwt เหมือน push-send
+verify_jwt = false
+entrypoint = "./functions/send-scheduled-announcements/index.ts"

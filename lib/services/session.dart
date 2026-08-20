@@ -26,8 +26,8 @@ class AppSession {
   static bool get isVillageHead => roles.contains('village_head');
   static bool get isPalad => roles.contains('palad'); // เจ้าหน้าที่เทศบาล
   static bool get isAdmin => roles.contains('admin');
-  // ประกาศได้ทุกหมู่บ้าน = เทศบาล หรือ แอดมิน
-  static bool get canAnnounceAll => isPalad || isAdmin;
+  // ประกาศได้ทุกหมู่บ้าน = เทศบาลเท่านั้น (แอดมินดูแลระบบ ไม่ใช่คนออกประกาศ)
+  static bool get canAnnounceAll => isPalad;
 
   // หมู่บ้านในโปรไฟล์ (เช่น "บุญเรืองเหนือ")
   static String? get myVillage => profile?['village'] as String?;

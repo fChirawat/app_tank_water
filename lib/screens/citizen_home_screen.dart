@@ -130,8 +130,14 @@ final Map<UserRole, List<MenuItemData>> _roleMenus = {
       iconColor: AppColors.primary,
       label: 'Dashboard',
     ),
+    MenuItemData(
+      icon: Icons.campaign,
+      circleColor: Color(0xFFFFE4EF),
+      iconColor: Color(0xFFD84A85),
+      label: 'สร้างประกาศ',
+    ),
   ],
-  // ผู้ดูแลระบบ
+  // ผู้ดูแลระบบ (ดูแลระบบเท่านั้น ไม่ใช่คนออกประกาศ)
   UserRole.admin: const [
     MenuItemData(
       icon: Icons.manage_accounts,

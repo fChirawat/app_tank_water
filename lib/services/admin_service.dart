@@ -153,4 +153,20 @@ class AdminService {
     final data = response.data as Map<String, dynamic>;
     if (data['error'] != null) throw Exception(data['error']);
   }
+
+  // ===== เช็ครหัสปลดล็อกฟีเจอร์เสริม กับเซิร์ฟเวอร์ =====
+  // รหัสจริงเก็บเป็น secret ฝั่งเซิร์ฟเวอร์เท่านั้น ไม่มีอยู่ในตัวแอปเลย
+  static Future<bool> verifyFeatureUnlock(String featureId, String code) async {
+    final response = await _supabase.functions.invoke(
+      'admin-users',
+      body: {
+        'accessToken': AppSession.accessToken,
+        'action': 'verify-feature-unlock',
+        'featureId': featureId,
+        'code': code,
+      },
+    );
+    final data = response.data as Map<String, dynamic>;
+    return data['success'] == true;
+  }
 }
