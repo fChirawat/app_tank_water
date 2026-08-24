@@ -9,6 +9,7 @@ import 'package:printing/printing.dart';
 
 import '../services/complaint_service.dart';
 import '../services/dashboard_pdf_service.dart';
+import '../services/feature_unlock_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/addon_lock_prompt.dart';
 import '../widgets/app_dialog.dart';
@@ -31,13 +32,19 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
   // ไว้แคปรูปกราฟจริงจากหน้าจอ ตอนสร้างรายงาน PDF
   // (ตอนเทียบ แผนภูมิแท่งจะใช้ key เดียวกันนี้แหละ เพราะแสดงแทนกัน ไม่ได้อยู่พร้อมกัน)
   final _donutKey = GlobalKey();
+  final _compareDonutKey = GlobalKey();
   final _barKey = GlobalKey();
 
   // ช่วงเวลาที่เลือก
   DashboardPeriod? _selected;
 
+  // ฟีเจอร์เสริม: พิมพ์ PDF — ซ่อนปุ่มไปเลยถ้ายังไม่ปลดล็อก
+  bool _printUnlocked = false;
+
   // ฟีเจอร์เสริม: เปรียบเทียบกับอีกช่วงเวลาหนึ่ง (เลือกเองได้อิสระ)
+  // ซ่อนสวิตช์นี้ไปเลยถ้ายังไม่ปลดล็อก (เช็คตอนโหลดหน้า/ดึงข้อมูลใหม่)
   bool _compareMode = false;
+  bool _compareUnlocked = false;
   DashboardPeriod? _comparePeriod;
   DashboardData? _compareData;
   bool _loadingCompare = false;
@@ -80,6 +87,15 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
     setState(() {
       _loading = true;
       _error = null;
+    });
+
+    final printUnlocked = await FeatureUnlockService.isUnlocked('dashboard_print');
+    final compareUnlocked =
+        await FeatureUnlockService.isUnlocked('dashboard_compare');
+    if (!mounted) return;
+    setState(() {
+      _printUnlocked = printUnlocked;
+      _compareUnlocked = compareUnlocked;
     });
 
     try {
@@ -210,26 +226,29 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
               ),
             ),
           ),
-          GestureDetector(
-            onTap: _printing ? null : _onPrint,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.22),
-                shape: BoxShape.circle,
+          if (!_printUnlocked)
+            const SizedBox(width: 44, height: 44)
+          else
+            GestureDetector(
+              onTap: _printing ? null : _onPrint,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  shape: BoxShape.circle,
+                ),
+                child: _printing
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.print_outlined, color: Colors.white),
               ),
-              child: _printing
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Icon(Icons.print_outlined, color: Colors.white),
             ),
-          ),
         ],
       ),
     );
@@ -507,26 +526,39 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
         children: [
-          _buildPeriodDropdown(data.periods),
-          const SizedBox(height: 10),
-          _buildCompareToggle(),
-          if (_compareMode) ...[
-            const SizedBox(height: 8),
-            _loadingCompare
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 14),
-                    child: Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.2, color: AppColors.primary),
+          if (_compareUnlocked) ...[
+            _buildCompareToggle(),
+            if (_compareMode) ...[
+              const SizedBox(height: 8),
+              _loadingCompare
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 14),
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.2, color: AppColors.primary),
+                        ),
                       ),
-                    ),
-                  )
-                : _buildCompareDropdown(data.periods),
+                    )
+                  : _buildCompareDropdown(_periodsExcludingSelected(data.periods)),
+            ],
+            const SizedBox(height: 10),
           ],
+          _buildPeriodDropdown(data.periods),
           const SizedBox(height: 12),
+          if (_selected != null) ...[
+            Text(
+              'ข้อมูลของ ${_selected!.label}',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           _buildStatCards(data),
           if (_compareMode && _compareData != null) ...[
             const SizedBox(height: 16),
@@ -534,15 +566,29 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
           ],
           const SizedBox(height: 16),
           if (_compareMode && _compareData != null)
-            _buildCombinedChartsCard(data)
-          else ...[
+            _buildCompareDonutCard(data)
+          else
             _buildDonutCard(data),
-            const SizedBox(height: 16),
+          const SizedBox(height: 16),
+          if (_compareMode && _compareData != null)
+            _buildCombinedChartsCard(data)
+          else
             _buildBarCard(data),
-          ],
         ],
       ),
     );
+  }
+
+  // ตัดช่วงเวลาที่เลือกไว้เป็นหลักออกจากตัวเลือกฝั่งเปรียบเทียบ (กันเลือกซ้ำกันจนช่องหลักว่าง)
+  List<DashboardPeriod> _periodsExcludingSelected(List<DashboardPeriod> periods) {
+    final selected = _selected;
+    if (selected == null) return periods;
+    return periods
+        .where((p) =>
+            p.type != selected.type ||
+            p.year != selected.year ||
+            p.month != selected.month)
+        .toList();
   }
 
   // เรียงลำดับเวลาไว้เทียบว่าอันไหนเก่ากว่า (ปีที่ * 100 + เดือน, ปีอย่างเดียวถือเป็นต้นปี)
@@ -569,6 +615,34 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
     list.sort(
         (a, b) => (b.olderBudget + b.newerBudget).compareTo(a.olderBudget + a.newerBudget));
     return list;
+  }
+
+  // 2 การ์ดโดนัท เทียบเรื่องที่ส่งมาของ 2 ช่วงเวลาแยกกันคนละใบ (เก่า/ใหม่)
+  Widget _buildCompareDonutCard(DashboardData data) {
+    final cmp = _compareData!;
+    final selectedIsOlder =
+        _periodSortKey(_selected!) <= _periodSortKey(_comparePeriod!);
+
+    final olderData = selectedIsOlder ? data : cmp;
+    final olderLabel = selectedIsOlder ? _selected!.label : _comparePeriod!.label;
+    final newerData = selectedIsOlder ? cmp : data;
+    final newerLabel = selectedIsOlder ? _comparePeriod!.label : _selected!.label;
+
+    return Column(
+      children: [
+        _buildDonutCard(
+          newerData,
+          repaintKey: _donutKey,
+          subtitle: 'ข้อมูลของ $newerLabel',
+        ),
+        const SizedBox(height: 16),
+        _buildDonutCard(
+          olderData,
+          repaintKey: _compareDonutKey,
+          subtitle: 'ข้อมูลของ $olderLabel',
+        ),
+      ],
+    );
   }
 
   // การ์ดกราฟแท่งคู่ เทียบงบ 2 ช่วงเวลาต่อหมู่บ้านในกราฟเดียว (เก่า/ใหม่)
@@ -816,7 +890,18 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
           }).toList(),
           onChanged: (period) {
             if (period == null) return;
-            setState(() => _selected = period);
+            final cmp = _comparePeriod;
+            final sameAsCompare = cmp != null &&
+                cmp.type == period.type &&
+                cmp.year == period.year &&
+                cmp.month == period.month;
+            setState(() {
+              _selected = period;
+              if (sameAsCompare) {
+                _comparePeriod = null;
+                _compareData = null;
+              }
+            });
             _load();
           },
         ),

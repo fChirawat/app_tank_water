@@ -261,7 +261,7 @@ class DashboardPdfService {
             <td>จำนวนเรื่อง</td>
             <td class="num">$olderTotalReports</td>
             <td class="num">$newerTotalReports</td>
-            <td class="num">${_deltaHtml(newerTotalReports.toDouble(), olderTotalReports.toDouble())}</td>
+            <td class="num">${_deltaHtml(newerTotalReports.toDouble(), olderTotalReports.toDouble(), isMoney: false)}</td>
           </tr>
           <tr>
             <td>งบรวม (บาท)</td>
@@ -304,11 +304,11 @@ class DashboardPdfService {
   }
 
   // เทียบ "ใหม่" กับ "เก่า" (current, compare) เสมอ ไม่ว่าจะโชว์คอลัมน์ไหนก่อน
-  static String _deltaHtml(double current, double compare) {
+  static String _deltaHtml(double current, double compare, {bool isMoney = true}) {
     final diff = current - compare;
     if (diff == 0) return '<span class="compare-flat">เท่าเดิม</span>';
     final pctText = compare == 0
-        ? _money(diff.abs())
+        ? (isMoney ? _money(diff.abs()) : diff.abs().round().toString())
         : '${(diff / compare * 100).abs().toStringAsFixed(0)}%';
     final cls = diff > 0 ? 'compare-up' : 'compare-down';
     final arrow = diff > 0 ? '▲' : '▼';
