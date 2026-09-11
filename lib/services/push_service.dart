@@ -2,6 +2,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config.dart';
 import 'session.dart';
 
 
@@ -69,10 +70,16 @@ class PushService {
       debugPrint('สถานะอนุญาตแจ้งเตือน: ${settings.authorizationStatus}');
 
       // 2) ตั้งค่าตัวแสดงแจ้งเตือนบนเครื่อง + สร้าง channel ความสำคัญสูง
-      await _setupLocalNotifications();
+      // (เว็บไม่รองรับปลั๊กอินนี้ ข้ามไปเลย ไม่งั้น initialize() จะ throw
+      // แล้วทำให้ getToken() ด้านล่างไม่ถูกเรียกไปด้วย)
+      if (!kIsWeb) {
+        await _setupLocalNotifications();
+      }
 
-      // 3) ขอรหัสเครื่อง
-      token = await messaging.getToken();
+      // 3) ขอรหัสเครื่อง (เว็บต้องมี VAPID key ถึงจะขอได้)
+      token = await messaging.getToken(
+        vapidKey: kIsWeb ? AppConfig.fcmVapidKey : null,
+      );
       debugPrint('รหัสเครื่อง (FCM token): $token');
 
       // 4) ถ้า Firebase เปลี่ยนรหัสให้ใหม่ ก็รับไว้
@@ -115,6 +122,12 @@ class PushService {
 
     // แสดงแจ้งเตือนแบบเด้ง (heads-up) ตอนแอปเปิดอยู่
   static Future<void> _showHeadsUp(RemoteMessage message) async {
+    // เว็บไม่รองรับปลั๊กอินนี้ — ตอนแอปเปิดอยู่ (foreground) จะไม่มี heads-up
+    // ให้เห็น (บราวเซอร์ตาม spec จะไม่โชว์ Notification เองตอนแท็บ focus อยู่)
+    // ส่วนตอนปิดแท็บ/พับอยู่เบื้องหลัง service worker (firebase-messaging-sw.js)
+    // จะจัดการแสดงให้เอง
+    if (kIsWeb) return;
+
     final notif = message.notification;
     if (notif == null) return;
 

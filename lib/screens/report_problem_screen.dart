@@ -1,7 +1,7 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../data/complaint.dart';
+import '../data/picked_image.dart';
 import '../data/water_tank.dart';
 import '../services/complaint_service.dart';
 import '../theme/app_colors.dart';
@@ -23,7 +23,7 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
   final _detailController = TextEditingController();
 
   String? _selectedProblem; // ประเภทปัญหา
-  final List<File> _images = []; // รูปที่แนบ
+  final List<PickedImage> _images = []; // รูปที่แนบ
   static const int _maxImages = 4;
 
   double? _lat; // จุดที่มีปัญหา
@@ -140,11 +140,11 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
             return;
           }
 
-          setState(() {
-            _images.addAll(
-              picked.take(remain).map((x) => File(x.path)),
-            );
-          });
+          final toAdd = <PickedImage>[];
+          for (final x in picked.take(remain)) {
+            toAdd.add(PickedImage(bytes: await x.readAsBytes(), name: x.name));
+          }
+          setState(() => _images.addAll(toAdd));
 
           if (picked.length > remain) {
             _toast('สามารถแนบรูปได้สูงสุด $_maxImages รูป');
@@ -163,7 +163,8 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
             return;
           }
 
-          setState(() => _images.add(File(picked.path)));
+          final bytes = await picked.readAsBytes();
+          setState(() => _images.add(PickedImage(bytes: bytes, name: picked.name)));
         }
       }
     } catch (e) {
@@ -229,8 +230,8 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: Image.file(
-                        _images[i],
+                      child: Image.memory(
+                        _images[i].bytes,
                         width: 80,
                         height: 80,
                         fit: BoxFit.cover,

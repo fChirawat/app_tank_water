@@ -21,7 +21,7 @@ enum ComplaintStatus {
   paladWait, // ปลัดรับแล้ว รอสมทบงบ
   repairing, // กำลังซ่อม
   done, // ซ่อมเสร็จ
-  rejected, // ไม่อนุมัติ
+  rejected, // ลงพื้นที่ตรวจสอบแล้วไม่พบปัญหาจริง
 }
 
 // แปลงชื่อสถานะจากฐานข้อมูล -> enum
@@ -72,7 +72,7 @@ String statusLabel(ComplaintStatus s) {
     case ComplaintStatus.done:
       return 'ซ่อมเสร็จ';
     case ComplaintStatus.rejected:
-      return 'ไม่อนุมัติ';
+      return 'ไม่พบปัญหาจริง';
   }
 }
 
@@ -99,7 +99,7 @@ String statusLabelDone(ComplaintStatus s) {
     case ComplaintStatus.done:
       return 'ซ่อมเสร็จ';
     case ComplaintStatus.rejected:
-      return 'ไม่อนุมัติ';
+      return 'ไม่พบปัญหาจริง';
   }
 }
 class Complaint {

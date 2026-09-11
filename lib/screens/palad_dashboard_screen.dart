@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -10,6 +11,7 @@ import 'package:printing/printing.dart';
 import '../services/complaint_service.dart';
 import '../services/dashboard_pdf_service.dart';
 import '../services/feature_unlock_service.dart';
+import '../services/web_print/web_print.dart';
 import '../theme/app_colors.dart';
 import '../widgets/addon_lock_prompt.dart';
 import '../widgets/app_dialog.dart';
@@ -319,6 +321,36 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
                   amount: d.budget,
                 ))
             .toList();
+      }
+
+      if (kIsWeb) {
+        // เว็บไม่มีตัวแปลง HTML -> PDF ให้เปิดรายงานเป็นหน้าเว็บในแท็บใหม่แทน
+        // ผู้ใช้กด Print ของเบราว์เซอร์ (Ctrl+P) -> Save as PDF เอง
+        final html = DashboardPdfService.buildHtml(
+          title: 'ภาพรวมสถิติเทศบาล',
+          periodLabel: _selected?.label ?? '',
+          totalReports: data.totalReports,
+          totalBudget: data.totalBudget,
+          donutTitle: 'เรื่องที่ส่งมาเทศบาล แยกตามหมู่บ้าน',
+          donutRows: donutRows,
+          donutImageDataUrl: donutImage,
+          barTitle: 'งบที่เทศบาลสมทบ แยกตามหมู่บ้าน',
+          barRows: barRows,
+          barImageDataUrl: barImage,
+          showSinglePeriodSections: !comparing,
+          olderLabel: olderLabel,
+          olderTotalReports: olderTotalReports,
+          olderTotalBudget: olderTotalBudget,
+          newerLabel: newerLabel,
+          newerTotalReports: newerTotalReports,
+          newerTotalBudget: newerTotalBudget,
+          compareBarBreakdown: comparing ? compareBreakdown : null,
+          compareBarImageDataUrl: compareBarImage,
+        );
+        if (!mounted) return;
+        setState(() => _printing = false);
+        await openHtmlForPrint(html);
+        return;
       }
 
       final bytes = await DashboardPdfService.build(

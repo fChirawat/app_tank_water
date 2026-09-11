@@ -41,7 +41,6 @@ List<String> get kVillagesWithMoo =>
 
 // ===== ประเภทประปา =====
 const List<String> kTankTypes = [
-  'แทงค์สูง',
-  'แทงค์คอนกรีต',
   'แทงค์บาดาล',
+  'แทงค์ประปาภูเขา',
 ];

@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../data/picked_image.dart';
 import '../data/water_tank.dart';
 import 'session.dart';
 
@@ -9,6 +9,27 @@ import 'session.dart';
 // เขียน: ผ่าน Edge Function ที่ตรวจ role เจ้าหน้าที่ก่อน
 class TankService {
   static final _supabase = Supabase.instance.client;
+
+  // เรียก Edge Function 'water-tanks' + แกะ error ให้อ่านง่าย
+  // (functions.invoke() throw FunctionException ตรงๆ เมื่อ status ไม่ใช่ 2xx
+  //  ถ้าไม่แกะเอง จะโชว์ FunctionException(status: .., details: ..) ดิบๆ ให้ผู้ใช้เห็น)
+  static Future<Map<String, dynamic>> _invoke(
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final response =
+          await _supabase.functions.invoke('water-tanks', body: body);
+      final data = response.data as Map<String, dynamic>;
+      if (data['error'] != null) throw Exception(data['error']);
+      return data;
+    } on FunctionException catch (e) {
+      final details = e.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception('เกิดข้อผิดพลาด (${e.status})');
+    }
+  }
 
   // ===== ดึงรายการแทงค์ทั้งหมด =====
   static Future<List<WaterTank>> fetchTanks() async {
@@ -25,23 +46,13 @@ class TankService {
   // ===== อัปโหลดรูป 1 รูป แล้วคืน URL สำหรับแสดงผล =====
   // ขั้นตอน: ขอ "ตั๋วอัปโหลด" จาก Edge Function (เช็ค role ก่อน)
   //         -> อัปไฟล์เข้า Storage โดยตรง -> ได้ URL กลับมา
-  static Future<String> uploadImage(File file) async {
-    final fileName = file.path.split(Platform.pathSeparator).last;
-
+  static Future<String> uploadImage(PickedImage image) async {
     // 1) ขอตั๋วอัปโหลด
-    final response = await _supabase.functions.invoke(
-      'water-tanks',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'upload-url',
-        'fileName': fileName,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'upload-url',
+      'fileName': image.name,
+    });
 
     final path = data['path'] as String;
     final token = data['token'] as String;
@@ -50,16 +61,16 @@ class TankService {
     // 2) อัปไฟล์เข้า Storage ด้วยตั๋วที่ได้มา
     await _supabase.storage
         .from('tank-images')
-        .uploadToSignedUrl(path, token, file);
+        .uploadBinaryToSignedUrl(path, token, image.bytes);
 
     return publicUrl;
   }
 
   // ===== อัปโหลดหลายรูปพร้อมกัน =====
-  static Future<List<String>> uploadImages(List<File> files) async {
+  static Future<List<String>> uploadImages(List<PickedImage> images) async {
     final urls = <String>[];
-    for (final f in files) {
-      urls.add(await uploadImage(f));
+    for (final img in images) {
+      urls.add(await uploadImage(img));
     }
     return urls;
   }
@@ -79,32 +90,24 @@ class TankService {
     String? caretaker,
     String? caretakerPhone,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'water-tanks',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'create',
-        'tank': {
-          'name': name,
-          'type': type,
-          'village': village,
-          'moo': moo,
-          'detail': detail,
-          'imageUrls': imageUrls,
-          'lat': lat,
-          'lng': lng,
-          'capacity': capacity,
-          'builtYear': builtYear,
-          'caretaker': caretaker,
-          'caretakerPhone': caretakerPhone,
-        },
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'create',
+      'tank': {
+        'name': name,
+        'type': type,
+        'village': village,
+        'moo': moo,
+        'detail': detail,
+        'imageUrls': imageUrls,
+        'lat': lat,
+        'lng': lng,
+        'capacity': capacity,
+        'builtYear': builtYear,
+        'caretaker': caretaker,
+        'caretakerPhone': caretakerPhone,
       },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    });
 
     return WaterTank.fromJson(data['tank'] as Map<String, dynamic>);
   }
@@ -125,51 +128,35 @@ class TankService {
     String? caretaker,
     String? caretakerPhone,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'water-tanks',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'update',
-        'tankId': tankId,
-        'tank': {
-          'name': name,
-          'type': type,
-          'village': village,
-          'moo': moo,
-          'detail': detail,
-          'imageUrls': imageUrls,
-          'lat': lat,
-          'lng': lng,
-          'capacity': capacity,
-          'builtYear': builtYear,
-          'caretaker': caretaker,
-          'caretakerPhone': caretakerPhone,
-        },
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'update',
+      'tankId': tankId,
+      'tank': {
+        'name': name,
+        'type': type,
+        'village': village,
+        'moo': moo,
+        'detail': detail,
+        'imageUrls': imageUrls,
+        'lat': lat,
+        'lng': lng,
+        'capacity': capacity,
+        'builtYear': builtYear,
+        'caretaker': caretaker,
+        'caretakerPhone': caretakerPhone,
       },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    });
 
     return WaterTank.fromJson(data['tank'] as Map<String, dynamic>);
   }
 
   // ===== ลบแทงค์ =====
   static Future<void> deleteTank(String tankId) async {
-    final response = await _supabase.functions.invoke(
-      'water-tanks',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'delete',
-        'tankId': tankId,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'delete',
+      'tankId': tankId,
+    });
   }
 }

@@ -1,10 +1,9 @@
-import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/complaint.dart';
+import '../data/picked_image.dart';
 import '../data/tank_status.dart';
 import '../data/repair.dart';
 import 'session.dart';
-import 'package:flutter/foundation.dart';
 
 // ผลลัพธ์ getItems: รายการวัสดุ + สาเหตุที่เจอหน้างาน
 class ItemsResult {
@@ -37,23 +36,34 @@ class TimelineResult {
 class ComplaintService {
   static final _supabase = Supabase.instance.client;
 
-  // ===== อัปโหลดรูป 1 รูป =====
-  static Future<String> uploadImage(File file) async {
-    final fileName = file.path.split(Platform.pathSeparator).last;
-
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'upload-url',
-        'fileName': fileName,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) {
-      throw Exception(data['error']);
+  // เรียก Edge Function 'complaints' + แกะ error ให้อ่านง่าย
+  // (functions.invoke() throw FunctionException ตรงๆ เมื่อ status ไม่ใช่ 2xx
+  //  ถ้าไม่แกะเอง จะโชว์ FunctionException(status: .., details: ..) ดิบๆ ให้ผู้ใช้เห็น)
+  static Future<Map<String, dynamic>> _invoke(
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final response =
+          await _supabase.functions.invoke('complaints', body: body);
+      final data = response.data as Map<String, dynamic>;
+      if (data['error'] != null) throw Exception(data['error']);
+      return data;
+    } on FunctionException catch (e) {
+      final details = e.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception('เกิดข้อผิดพลาด (${e.status})');
     }
+  }
+
+  // ===== อัปโหลดรูป 1 รูป =====
+  static Future<String> uploadImage(PickedImage image) async {
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'upload-url',
+      'fileName': image.name,
+    });
 
     final path = data['path'] as String;
     final token = data['token'] as String;
@@ -61,16 +71,16 @@ class ComplaintService {
 
     await _supabase.storage
         .from('tank-images')
-        .uploadToSignedUrl(path, token, file);
+        .uploadBinaryToSignedUrl(path, token, image.bytes);
 
     return publicUrl;
   }
 
   // ===== อัปโหลดหลายรูป =====
-  static Future<List<String>> uploadImages(List<File> files) async {
+  static Future<List<String>> uploadImages(List<PickedImage> images) async {
     final urls = <String>[];
-    for (final f in files) {
-      urls.add(await uploadImage(f));
+    for (final img in images) {
+      urls.add(await uploadImage(img));
     }
     return urls;
   }
@@ -84,26 +94,18 @@ class ComplaintService {
     double? lat,
     double? lng,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'create',
-        'complaint': {
-          'tankId': tankId,
-          'problemType': problemType,
-          'detail': detail,
-          'imageUrls': imageUrls,
-          'lat': lat,
-          'lng': lng,
-        },
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'create',
+      'complaint': {
+        'tankId': tankId,
+        'problemType': problemType,
+        'detail': detail,
+        'imageUrls': imageUrls,
+        'lat': lat,
+        'lng': lng,
       },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    });
 
     return Complaint.fromJson(data['complaint'] as Map<String, dynamic>);
   }
@@ -111,17 +113,11 @@ class ComplaintService {
   // ===== ดูสถานะประปา (แทงค์ + เรื่องล่าสุด) =====
   // village ว่าง = ทุกหมู่บ้าน
   static Future<List<TankStatus>> fetchTankStatus(String? village) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'tank-status',
-        'village': village ?? '',
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'tank-status',
+      'village': village ?? '',
+    });
 
     return (data['tanks'] as List)
         .map((t) => TankStatus.fromJson(t as Map<String, dynamic>))
@@ -131,16 +127,11 @@ class ComplaintService {
   // ===== ผู้ใหญ่บ้าน: ดูเรื่อง (เฉพาะหมู่บ้านตัวเอง) =====
   // status: 'budget_wait' (รอรับ) หรือ 'budget_review' (รับแล้ว)
   static Future<List<Complaint>> villageHeadList(String status) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'village-head-list',
-        'status': status,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'village-head-list',
+      'status': status,
+    });
     return (data['complaints'] as List)
         .map((c) => Complaint.fromJson(c as Map<String, dynamic>))
         .toList();
@@ -148,16 +139,11 @@ class ComplaintService {
 
   // ผู้ใหญ่บ้านรับเรื่อง (budget_wait -> budget_review)
   static Future<void> headReceive(String complaintId) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'head-receive',
-        'complaintId': complaintId,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'head-receive',
+      'complaintId': complaintId,
+    });
   }
 
   // ผู้ใหญ่บ้านตัดสินงบ: 'approve' = งบพอ, 'insufficient' = งบไม่พอ (ต้องมี shortfall)
@@ -166,32 +152,38 @@ class ComplaintService {
     String decision, {
     double? shortfall,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'head-decide',
-        'complaintId': complaintId,
-        'decision': decision,
-        'shortfall': shortfall,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'head-decide',
+      'complaintId': complaintId,
+      'decision': decision,
+      'shortfall': shortfall,
+    });
   }
 
   // ===== เดินสถานะไปสเต็ปถัดไป (ข้ามไม่ได้) =====
   static Future<void> advanceStatus(String complaintId) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'advance-status',
-        'complaintId': complaintId,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'advance-status',
+      'complaintId': complaintId,
+    });
+  }
+
+  // ===== ปิดเรื่องแบบ "ไม่พบปัญหา" (ตอนลงพื้นที่ประเมิน) =====
+  // ต้องกรอกเหตุผล + รหัสยืนยัน ปิดแล้วย้อนกลับไม่ได้
+  static Future<void> rejectComplaint(
+    String complaintId,
+    String reason,
+    String code,
+  ) async {
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'reject-complaint',
+      'complaintId': complaintId,
+      'reason': reason,
+      'code': code,
+    });
   }
 
   // ===== วัสดุซ่อม =====
@@ -202,34 +194,24 @@ class ComplaintService {
     String? problemType, // ประเภทปัญหา (เจ้าหน้าที่แก้ให้ตรงหน้างาน)
     String? detail, // รายละเอียดปัญหา (เจ้าหน้าที่แก้)
   }) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'save-items',
-        'complaintId': complaintId,
-        'items': items,
-        'surveyNote': surveyNote,
-        'problemType': problemType,
-        'detail': detail,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'save-items',
+      'complaintId': complaintId,
+      'items': items,
+      'surveyNote': surveyNote,
+      'problemType': problemType,
+      'detail': detail,
+    });
   }
 
   // คืนทั้งรายการวัสดุ + สาเหตุที่เจอ
   static Future<ItemsResult> getItems(String complaintId) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'get-items',
-        'complaintId': complaintId,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'get-items',
+      'complaintId': complaintId,
+    });
     final items = (data['items'] as List)
         .map((i) => RepairItem.fromJson(i as Map<String, dynamic>))
         .toList();
@@ -241,30 +223,20 @@ class ComplaintService {
 
   // ===== บันทึกความคืบหน้าการซ่อม =====
   static Future<void> addLog(String complaintId, String note) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'add-log',
-        'complaintId': complaintId,
-        'note': note,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'add-log',
+      'complaintId': complaintId,
+      'note': note,
+    });
   }
 
   static Future<List<RepairLog>> getLogs(String complaintId) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'get-logs',
-        'complaintId': complaintId,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'get-logs',
+      'complaintId': complaintId,
+    });
     return (data['logs'] as List)
         .map((l) => RepairLog.fromJson(l as Map<String, dynamic>))
         .toList();
@@ -273,18 +245,10 @@ class ComplaintService {
   // ===== ดูรายการเรื่องร้องเรียน =====
   // ประชาชน -> เห็นเฉพาะของตัวเอง | เจ้าหน้าที่ขึ้นไป -> เห็นทุกเรื่อง
   static Future<List<Complaint>> fetchComplaints() async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'list',
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'list',
+    });
 
     return (data['complaints'] as List)
         .map((row) => Complaint.fromJson(row as Map<String, dynamic>))
@@ -293,20 +257,11 @@ class ComplaintService {
 
   // ===== ประวัติแจ้งปัญหา (เฉพาะของตัวเอง) แบบแบ่งหน้าทีละ 10 =====
   static Future<MyReportsPage> fetchMyReports({int page = 0}) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'my-reports',
-        'page': page,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'my-reports',
+      'page': page,
+    });
 
     final items = (data['complaints'] as List)
         .map((row) => Complaint.fromJson(row as Map<String, dynamic>))
@@ -323,31 +278,21 @@ class ComplaintService {
 
   // ===== นับงานค้างของแต่ละเมนู (สำหรับ badge) =====
   static Future<Map<String, int>> menuCounts() async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'menu-counts',
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'menu-counts',
+    });
     final raw = (data['counts'] as Map<String, dynamic>?) ?? {};
     return raw.map((k, v) => MapEntry(k, (v as num).toInt()));
   }
 
   // ===== ดึง timeline ประวัติสถานะ =====
   static Future<TimelineResult> getTimeline(String complaintId) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'get-timeline',
-        'complaintId': complaintId,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'get-timeline',
+      'complaintId': complaintId,
+    });
 
     final complaint =
         Complaint.fromJson(data['complaint'] as Map<String, dynamic>);
@@ -374,45 +319,30 @@ class ComplaintService {
 
   // ===== ปลัด =====
   static Future<List<Complaint>> paladList(String status) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'palad-list',
-        'status': status,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'palad-list',
+      'status': status,
+    });
     return (data['complaints'] as List)
         .map((row) => Complaint.fromJson(row as Map<String, dynamic>))
         .toList();
   }
 
   static Future<void> paladReceive(String complaintId) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'palad-receive',
-        'complaintId': complaintId,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'palad-receive',
+      'complaintId': complaintId,
+    });
   }
 
   static Future<void> paladApprove(String complaintId) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'palad-approve',
-        'complaintId': complaintId,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'palad-approve',
+      'complaintId': complaintId,
+    });
   }
 
   // ===== Dashboard เทศบาล =====
@@ -422,47 +352,34 @@ class ComplaintService {
     required int year, // ค.ศ.
     int? month,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'palad-dashboard',
-        'mode': mode,
-        'year': year,
-        if (month != null) 'month': month,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'palad-dashboard',
+      'mode': mode,
+      'year': year,
+      if (month != null) 'month': month,
+    });
 
     return DashboardData.fromJson(data);
   }
 
-  // ===== Dashboard ผู้ใหญ่บ้าน =====
+  // ===== Dashboard หมู่บ้าน (ผู้ใหญ่บ้าน/เจ้าหน้าที่หมู่บ้าน) =====
   // เห็นเฉพาะหมู่บ้านที่ดูแล และแยกข้อมูลตามแทงค์น้ำ
   static Future<VillageHeadDashboardData> fetchVillageHeadDashboard({
     required String mode,
     required int year, // ค.ศ.
     int? month,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'complaints',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'village-head-dashboard',
-        'mode': mode,
-        'year': year,
-        if (month != null) 'month': month,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'village-head-dashboard',
+      'mode': mode,
+      'year': year,
+      if (month != null) 'month': month,
+    });
 
     return VillageHeadDashboardData.fromJson(data);
   }
-
 }
 
 // ผลลัพธ์ประวัติแจ้งปัญหา แบบแบ่งหน้า

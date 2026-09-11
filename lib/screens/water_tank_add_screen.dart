@@ -1,10 +1,10 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import '../theme/app_colors.dart';
 import '../widgets/image_gallery.dart';
 import '../widgets/app_dialog.dart';
+import '../data/picked_image.dart';
 import '../data/villages.dart';
 import '../data/water_tank.dart';
 import '../services/tank_service.dart';
@@ -43,7 +43,7 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
   double? _lat; // ตำแหน่งบนแผนที่
   double? _lng;
 
-  final List<File> _images = []; // รูปที่เลือกไว้ (ยังไม่ได้อัปโหลด)
+  final List<PickedImage> _images = []; // รูปที่เลือกไว้ (ยังไม่ได้อัปโหลด)
   bool _saving = false; // กำลังบันทึกอยู่ไหม (กันกดซ้ำ)
   String _savingText = ''; // บอกว่ากำลังทำอะไรอยู่
 
@@ -564,16 +564,24 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
         // เลือกได้หลายรูป — imageQuality ย่อรูปให้เล็กลง ประหยัดเน็ต
         final picked = await picker.pickMultiImage(imageQuality: 70);
         if (picked.isNotEmpty) {
-          setState(() => _images.addAll(picked.map((x) => File(x.path))));
+          final toAdd = <PickedImage>[];
+          for (final x in picked) {
+            toAdd.add(PickedImage(bytes: await x.readAsBytes(), name: x.name));
+          }
+          if (!mounted) return;
+          setState(() => _images.addAll(toAdd));
         }
       } else {
         final picked =
             await picker.pickImage(source: source, imageQuality: 70);
         if (picked != null) {
-          setState(() => _images.add(File(picked.path)));
+          final bytes = await picked.readAsBytes();
+          if (!mounted) return;
+          setState(() => _images.add(PickedImage(bytes: bytes, name: picked.name)));
         }
       }
     } catch (e) {
+      if (!mounted) return;
       AppDialog.error(context, 'เลือกรูปไม่สำเร็จ');
     }
   }

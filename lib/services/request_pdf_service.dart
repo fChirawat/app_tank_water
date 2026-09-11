@@ -16,10 +16,12 @@ class RequestPdfService {
   static const String _defaultSignerName = 'นายธนศักดิ์ แอ่นปัญญา';
   static const String _defaultSignerPosition = 'นายกเทศมนตรีตำบลบุญเรือง';
 
-  static Future<Uint8List> build({
+  // เปิดเป็น public ไว้ให้ฝั่งเว็บเรียกตรงๆ ได้ (ดู web_print.dart) —
+  // เว็บไม่มี flutter_native_html_to_pdf ให้แปลงเป็น PDF bytes เลยเปิด HTML
+  // นี้ในแท็บใหม่แทน แล้วให้ผู้ใช้กด Print ของเบราว์เซอร์ -> Save as PDF เอา
+  static Future<String> buildHtmlForComplaint({
     required Complaint complaint,
     required List<RepairItem> items,
-    // ชื่อ/ตำแหน่งผู้ลงนาม — ไม่ระบุ = ใช้ค่าเริ่มต้น (ฟีเจอร์กำหนดเองต้องปลดล็อกก่อน)
     String? signerName,
     String? signerPosition,
   }) async {
@@ -57,7 +59,7 @@ class RequestPdfService {
       maxImages: 4,
     );
 
-    final html = _buildHtml(
+    return _buildHtml(
       date: complaint.createdAt,
       subject: subject,
       moo: moo,
@@ -70,6 +72,21 @@ class RequestPdfService {
       total: total,
       availableBudget: availableBudget,
       shortfall: shortfall,
+    );
+  }
+
+  static Future<Uint8List> build({
+    required Complaint complaint,
+    required List<RepairItem> items,
+    // ชื่อ/ตำแหน่งผู้ลงนาม — ไม่ระบุ = ใช้ค่าเริ่มต้น (ฟีเจอร์กำหนดเองต้องปลดล็อกก่อน)
+    String? signerName,
+    String? signerPosition,
+  }) async {
+    final html = await buildHtmlForComplaint(
+      complaint: complaint,
+      items: items,
+      signerName: signerName,
+      signerPosition: signerPosition,
     );
 
     final bytes = await _converter.convertHtmlToPdfBytes(html: html);

@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import '../data/picked_image.dart';
 import '../theme/app_colors.dart';
 
 // ===================================================
@@ -14,7 +14,7 @@ class ImageGrid extends StatelessWidget {
   final List<String> urls;
 
   // รูปจากเครื่อง (ไฟล์ที่เพิ่งเลือก ยังไม่อัปโหลด)
-  final List<File> files;
+  final List<PickedImage> files;
 
   // ถ้าใส่มา จะมีปุ่มกากบาทให้ลบ (ส่ง index ของรูปกลับไป)
   // index จะนับ urls ก่อน แล้วต่อด้วย files
@@ -76,7 +76,7 @@ class ImageGrid extends StatelessWidget {
                   const Icon(Icons.broken_image, color: AppColors.textGrey),
             ),
           )
-        : Image.file(files[index - urls.length], fit: BoxFit.cover);
+        : Image.memory(files[index - urls.length].bytes, fit: BoxFit.cover);
 
     return Stack(
       fit: StackFit.expand,
@@ -128,7 +128,7 @@ class ImageGrid extends StatelessWidget {
 // ซูมได้ (นิ้วถ่างเข้าออก / แตะสองครั้ง) และปัดซ้ายขวาเปลี่ยนรูป
 class ImageViewerScreen extends StatefulWidget {
   final List<String> urls;
-  final List<File> files;
+  final List<PickedImage> files;
   final int initialIndex;
 
   const ImageViewerScreen({
@@ -215,8 +215,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                                 size: 60,
                               ),
                             )
-                          : Image.file(
-                              widget.files[i - widget.urls.length],
+                          : Image.memory(
+                              widget.files[i - widget.urls.length].bytes,
                               fit: BoxFit.contain,
                             ),
                     ),

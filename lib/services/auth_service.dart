@@ -32,6 +32,29 @@ class LoginResultData {
 class AuthService {
   static final _supabase = Supabase.instance.client;
 
+  // เรียก Edge Function (line-login / line-register / complaints) + แกะ error
+  // ให้อ่านง่าย (functions.invoke() throw FunctionException ตรงๆ เมื่อ status
+  // ไม่ใช่ 2xx ถ้าไม่แกะเอง จะโชว์ FunctionException(status: .., details: ..)
+  // ดิบๆ ให้ผู้ใช้เห็น)
+  static Future<Map<String, dynamic>> _invoke(
+    String functionName,
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final response =
+          await _supabase.functions.invoke(functionName, body: body);
+      final data = response.data as Map<String, dynamic>;
+      if (data['error'] != null) throw Exception(data['error']);
+      return data;
+    } on FunctionException catch (e) {
+      final details = e.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception('เกิดข้อผิดพลาด (${e.status})');
+    }
+  }
+
   // สุ่มค่า state เพื่อกันการปลอมแปลงคำขอ (CSRF)
   static String _randomState() {
     final rnd = Random.secure();
@@ -43,10 +66,6 @@ class AuthService {
   static Future<LoginResultData> _handleLoginResponse(
     Map<String, dynamic> data,
   ) async {
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
-
     final token = data['accessToken'] as String?;
 
     if (data['isNewUser'] == true) {
@@ -90,22 +109,24 @@ class AuthService {
       scopes: const ['profile', 'openid'],
     );
 
-    final response = await _supabase.functions.invoke(
-      'line-login',
-      body: {'accessToken': result.accessToken.value},
-    );
+    final data = await _invoke('line-login', {
+      'accessToken': result.accessToken.value,
+    });
 
-    return _handleLoginResponse(response.data as Map<String, dynamic>);
+    return _handleLoginResponse(data);
   }
 
-  // ===== ล็อกอินแบบเว็บ (สำรองไว้ เผื่อต้องสลับกลับ) =====
-  // ignore: unused_element
+  // ===== ล็อกอินแบบเว็บ =====
+  // ใช้ตอนรันบน Flutter Web (kIsWeb) แทน loginWithLine() ที่พึ่ง LINE native SDK
+  // ซึ่งไม่มีบนเว็บ — เปิดหน้าล็อกอิน LINE ในหน้าต่างใหม่ แล้วรอ callback ที่
+  // web/auth.html (ต้องไปเพิ่ม webRedirectUri ใน LINE Developers Console ก่อน)
   static Future<LoginResultData> loginWithLineWeb() async {
     final state = _randomState();
+    final redirectUri = AppConfig.webRedirectUri;
 
     // เปิดหน้าล็อกอิน แล้วรอ URL ที่เด้งกลับเข้าแอป
     final resultUrl = await FlutterWebAuth2.authenticate(
-      url: AppConfig.buildLineAuthUrl(state),
+      url: AppConfig.buildLineAuthUrl(state, redirectUriOverride: redirectUri),
       callbackUrlScheme: AppConfig.callbackScheme,
     );
 
@@ -117,7 +138,7 @@ class AuthService {
       throw Exception('LINE แจ้งข้อผิดพลาด: $error');
     }
 
-    // เช็คว่า state ตรงกับที่ส่งไป (กันการปลอมแปลง)
+    // เช็คว่า state ตรงกับที่ส่งไป (กันการปลอมแปลงคำขอ)
     if (uri.queryParameters['state'] != state) {
       throw Exception('state ไม่ตรงกัน อาจถูกปลอมแปลงคำขอ');
     }
@@ -128,15 +149,13 @@ class AuthService {
     }
 
     // เรียก Edge Function: line-login
-    final response = await _supabase.functions.invoke(
-      'line-login',
-      body: {
-        'code': code,
-        'redirectUri': AppConfig.redirectUri,
-      },
-    );
+    // redirectUri ต้องตรงกับที่ใช้ตอนขอ code เป๊ะๆ (LINE เช็ค exact match)
+    final data = await _invoke('line-login', {
+      'code': code,
+      'redirectUri': redirectUri,
+    });
 
-    return _handleLoginResponse(response.data as Map<String, dynamic>);
+    return _handleLoginResponse(data);
   }
 
   // ===== สมัครสมาชิกใหม่ (หลังกรอกข้อมูลในฟอร์ม) =====
@@ -150,24 +169,15 @@ class AuthService {
     required String? village,
     String? avatarUrl,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'line-register',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'title': title,
-        'firstName': firstName,
-        'lastName': lastName,
-        'houseNo': houseNo,
-        'village': village,
-        'avatarUrl': avatarUrl,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-
-    if (data['error'] != null) {
-      throw Exception(data['error']);
-    }
+    final data = await _invoke('line-register', {
+      'accessToken': AppSession.accessToken,
+      'title': title,
+      'firstName': firstName,
+      'lastName': lastName,
+      'houseNo': houseNo,
+      'village': village,
+      'avatarUrl': avatarUrl,
+    });
 
     final profile = data['profile'] as Map<String, dynamic>?;
     final roles =
@@ -213,20 +223,10 @@ class AuthService {
     if (!hasToken) return null;
 
     try {
-      final response = await _supabase.functions.invoke(
-        'complaints',
-        body: {
-          'accessToken': AppSession.accessToken,
-          'action': 'me',
-        },
-      );
-
-      final data = response.data as Map<String, dynamic>;
-      // token หมดอายุ หรือถูกลบออกจากระบบ
-      if (data['error'] != null) {
-        await AppSession.clear();
-        return null;
-      }
+      final data = await _invoke('complaints', {
+        'accessToken': AppSession.accessToken,
+        'action': 'me',
+      });
 
       final profile = data['profile'] as Map<String, dynamic>?;
       final roles =
@@ -248,7 +248,7 @@ class AuthService {
         roles: roles,
       );
     } catch (_) {
-      // เน็ตล่ม / เรียกไม่ได้ -> ให้ล็อกอินใหม่
+      // token หมดอายุ / ถูกลบออกจากระบบ / เน็ตล่ม -> ให้ล็อกอินใหม่
       return null;
     }
   }

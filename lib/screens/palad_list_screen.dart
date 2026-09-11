@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import '../data/complaint.dart';
@@ -6,6 +7,7 @@ import '../services/complaint_service.dart';
 import '../services/request_pdf_service.dart';
 import '../services/pdf_signer_prefs.dart';
 import '../services/feature_unlock_service.dart';
+import '../services/web_print/web_print.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_dialog.dart';
 import '../widgets/image_gallery.dart';
@@ -235,6 +237,7 @@ class _PaladDetailState extends State<_PaladDetail> {
   bool _loadingItems = true;
   bool _busy = false;
   bool _makingPdf = false;
+  bool _pdfCreated = false; // ต้องสร้างใบคำร้อง PDF ก่อนถึงจะกดสมทบงบ/อนุมัติได้
 
   @override
   void initState() {
@@ -275,6 +278,24 @@ class _PaladDetailState extends State<_PaladDetail> {
 
     setState(() => _makingPdf = true);
     try {
+      if (kIsWeb) {
+        // เว็บไม่มีตัวแปลง HTML -> PDF ให้เปิดใบคำร้องเป็นหน้าเว็บในแท็บใหม่แทน
+        // ผู้ใช้กด Print ของเบราว์เซอร์ (Ctrl+P) -> Save as PDF เอง
+        final html = await RequestPdfService.buildHtmlForComplaint(
+          complaint: widget.complaint,
+          items: _items,
+          signerName: signerName,
+          signerPosition: signerPosition,
+        );
+        if (!mounted) return;
+        setState(() {
+          _makingPdf = false;
+          _pdfCreated = true;
+        });
+        await openHtmlForPrint(html);
+        return;
+      }
+
       final bytes = await RequestPdfService.build(
         complaint: widget.complaint,
         items: _items,
@@ -282,7 +303,10 @@ class _PaladDetailState extends State<_PaladDetail> {
         signerPosition: signerPosition,
       );
       if (!mounted) return;
-      setState(() => _makingPdf = false);
+      setState(() {
+        _makingPdf = false;
+        _pdfCreated = true;
+      });
       // เปิด preview (มีปุ่มเซฟ/แชร์/พิมพ์ในตัว)
       await Printing.layoutPdf(onLayout: (_) async => bytes);
     } catch (e) {
@@ -672,6 +696,8 @@ class _PaladDetailState extends State<_PaladDetail> {
   Widget _bottomBar() {
     final label =
         widget.mode == PaladMode.receive ? 'รับเรื่อง' : 'สมทบงบ อนุมัติ';
+    // โหมดสมทบงบ ต้องสร้างใบคำร้อง PDF ก่อน ถึงจะกดอนุมัติได้
+    final requirePdfFirst = widget.mode == PaladMode.approve && !_pdfCreated;
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -701,16 +727,25 @@ class _PaladDetailState extends State<_PaladDetail> {
                 ),
               ),
             ),
+            if (requirePdfFirst) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'กรุณาสร้างใบคำร้อง PDF ก่อน จึงจะกด "สมทบงบ อนุมัติ" ได้',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Color(0xFFD9534F), fontSize: 12.5),
+              ),
+            ],
             const SizedBox(height: 10),
           ],
           SizedBox(
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: _busy ? null : _confirmAction,
+              onPressed: (_busy || requirePdfFirst) ? null : _confirmAction,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: const Color(0xFFEDEDF2),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),

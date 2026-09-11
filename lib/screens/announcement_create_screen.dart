@@ -5,7 +5,6 @@ import '../services/session.dart';
 import '../services/announcement_service.dart';
 import '../services/feature_unlock_service.dart';
 import '../theme/app_colors.dart';
-import '../widgets/addon_lock_prompt.dart';
 import '../widgets/app_dialog.dart';
 
 // หน้าเจ้าหน้าที่สร้างประกาศ
@@ -258,43 +257,9 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
   void _toast(String m) => AppDialog.warn(context, m);
 
   // ===== ฟีเจอร์เสริม: ตั้งเวลาส่งแจ้งเตือนล่วงหน้า =====
+  // ซ่อนไปเลยถ้ายังไม่ปลดล็อก (เหมือนปุ่มพิมพ์/สลับเปรียบเทียบใน Dashboard) —
+  // ปลดล็อกฟีเจอร์เสริมทำที่หน้ารายการฟีเจอร์เสริมโดยตรง ไม่ใช่ตรงนี้
   Widget _buildScheduleSection() {
-    if (!_scheduleUnlocked) {
-      return GestureDetector(
-        onTap: () async {
-          final ok = await ensureFeatureUnlocked(
-              context, 'scheduled_announcement', 'ตั้งเวลาส่งประกาศล่วงหน้า');
-          if (ok && mounted) setState(() => _scheduleUnlocked = true);
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFAFAFC),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.lock_outline,
-                  size: 18, color: AppColors.textGrey),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text(
-                  'ตั้งเวลาส่งแจ้งเตือนล่วงหน้า (ฟีเจอร์เสริม)',
-                  style: TextStyle(color: AppColors.textGrey, fontSize: 13),
-                ),
-              ),
-              const Text('ปลดล็อก',
-                  style: TextStyle(
-                      color: AppColors.primary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold)),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -415,8 +380,10 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    _buildScheduleSection(),
+                    if (_scheduleUnlocked) ...[
+                      const SizedBox(height: 16),
+                      _buildScheduleSection(),
+                    ],
                     const SizedBox(height: 16),
                     _label('แจ้งให้'),
                     // เทศบาล/แอดมิน เลือกหมู่บ้านได้ / เจ้าหน้าที่หมู่บ้าน = หมู่ตัวเอง

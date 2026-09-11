@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_dialog.dart';
@@ -23,7 +24,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     setState(() => _loading = true);
 
     try {
-      final result = await AuthService.loginWithLine();
+      // เว็บไม่มี LINE native SDK — ใช้ช่องทาง OAuth ผ่านเบราว์เซอร์แทน
+      final result = kIsWeb
+          ? await AuthService.loginWithLineWeb()
+          : await AuthService.loginWithLine();
 
       if (!mounted) return;
 

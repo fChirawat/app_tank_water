@@ -70,6 +70,27 @@ class UserPage {
 class AdminService {
   static final _supabase = Supabase.instance.client;
 
+  // เรียก Edge Function 'admin-users' + แกะ error ให้อ่านง่าย
+  // (functions.invoke() throw FunctionException ตรงๆ เมื่อ status ไม่ใช่ 2xx
+  //  ถ้าไม่แกะเอง จะโชว์ FunctionException(status: .., details: ..) ดิบๆ ให้ผู้ใช้เห็น)
+  static Future<Map<String, dynamic>> _invoke(
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final response =
+          await _supabase.functions.invoke('admin-users', body: body);
+      final data = response.data as Map<String, dynamic>;
+      if (data['error'] != null) throw Exception(data['error']);
+      return data;
+    } on FunctionException catch (e) {
+      final details = e.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception('เกิดข้อผิดพลาด (${e.status})');
+    }
+  }
+
   // ===== ผลการค้นหาแบบแบ่งหน้า =====
   // ผู้ใช้ในหน้านี้ + จำนวนทั้งหมด (ไว้คำนวณว่ามีกี่หน้า)
   static Future<UserPage> listUsers({
@@ -79,21 +100,15 @@ class AdminService {
     String? role, // กรองตามตำแหน่ง
     int page = 0,
   }) async {
-    final response = await _supabase.functions.invoke(
-      'admin-users',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'list-users',
-        'title': title ?? '',
-        'firstName': firstName ?? '',
-        'lastName': lastName ?? '',
-        'role': role ?? '',
-        'page': page,
-      },
-    );
-
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'list-users',
+      'title': title ?? '',
+      'firstName': firstName ?? '',
+      'lastName': lastName ?? '',
+      'role': role ?? '',
+      'page': page,
+    });
 
     final users = (data['users'] as List)
         .map((u) => ManagedUser.fromJson(u as Map<String, dynamic>))
@@ -116,19 +131,14 @@ class AdminService {
     String? village, // หมู่บ้าน (จำเป็นถ้าเป็นผู้ใหญ่บ้าน/เจ้าหน้าที่)
     bool force = false, // true = ยืนยันย้ายคนเก่าออก
   }) async {
-    final response = await _supabase.functions.invoke(
-      'admin-users',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'add-role',
-        'profileId': profileId,
-        'role': role,
-        'village': village,
-        'force': force,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'add-role',
+      'profileId': profileId,
+      'role': role,
+      'village': village,
+      'force': force,
+    });
     // หมู่บ้านมีคนดูแลอยู่แล้ว -> ต้องให้ผู้ใช้ยืนยัน
     if (data['needConfirm'] == true) {
       return AddRoleResult(
@@ -141,32 +151,40 @@ class AdminService {
 
   // ===== ลบ role ออกจากผู้ใช้ =====
   static Future<void> removeRole(String profileId, String role) async {
-    final response = await _supabase.functions.invoke(
-      'admin-users',
-      body: {
-        'accessToken': AppSession.accessToken,
-        'action': 'remove-role',
-        'profileId': profileId,
-        'role': role,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    if (data['error'] != null) throw Exception(data['error']);
+    await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'remove-role',
+      'profileId': profileId,
+      'role': role,
+    });
+  }
+
+  // ===== ลบบัญชีผู้ใช้ทั้งหมด (ต้องกรอกรหัสยืนยันก่อน) =====
+  // คืน true ถ้าลบได้แค่ล้างข้อมูลส่วนตัว (มีเรื่องแจ้งซ่อมผูกอยู่)
+  // คืน false ถ้าลบทั้งบัญชีได้เลย (ไม่มีเรื่องผูกอยู่)
+  static Future<bool> deleteUser(String profileId, String code) async {
+    final data = await _invoke({
+      'accessToken': AppSession.accessToken,
+      'action': 'delete-user',
+      'profileId': profileId,
+      'code': code,
+    });
+    return data['anonymized'] == true;
   }
 
   // ===== เช็ครหัสปลดล็อกฟีเจอร์เสริม กับเซิร์ฟเวอร์ =====
   // รหัสจริงเก็บเป็น secret ฝั่งเซิร์ฟเวอร์เท่านั้น ไม่มีอยู่ในตัวแอปเลย
   static Future<bool> verifyFeatureUnlock(String featureId, String code) async {
-    final response = await _supabase.functions.invoke(
-      'admin-users',
-      body: {
+    try {
+      final data = await _invoke({
         'accessToken': AppSession.accessToken,
         'action': 'verify-feature-unlock',
         'featureId': featureId,
         'code': code,
-      },
-    );
-    final data = response.data as Map<String, dynamic>;
-    return data['success'] == true;
+      });
+      return data['success'] == true;
+    } catch (_) {
+      return false;
+    }
   }
 }

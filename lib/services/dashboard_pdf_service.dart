@@ -57,7 +57,7 @@ class DashboardPdfService {
     // หน้าจอเองก็ไม่โชว์กราฟเดี่ยวแล้วเหมือนกัน)
     bool showSinglePeriodSections = true,
   }) async {
-    final html = _buildHtml(
+    final html = buildHtml(
       title: title,
       periodLabel: periodLabel,
       totalReports: totalReports,
@@ -86,7 +86,10 @@ class DashboardPdfService {
     return bytes;
   }
 
-  static String _buildHtml({
+  // เปิดเป็น public ไว้ให้ฝั่งเว็บเรียกตรงๆ ได้ (ดู web_print.dart) —
+  // เว็บไม่มี flutter_native_html_to_pdf ให้แปลงเป็น PDF bytes เลยเปิด HTML
+  // นี้ในแท็บใหม่แทน แล้วให้ผู้ใช้กด Print ของเบราว์เซอร์ -> Save as PDF เอา
+  static String buildHtml({
     required String title,
     required String periodLabel,
     required int totalReports,

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -10,11 +11,12 @@ import 'package:printing/printing.dart';
 import '../services/complaint_service.dart';
 import '../services/dashboard_pdf_service.dart';
 import '../services/feature_unlock_service.dart';
+import '../services/web_print/web_print.dart';
 import '../theme/app_colors.dart';
 import '../widgets/addon_lock_prompt.dart';
 import '../widgets/app_dialog.dart';
 
-// Dashboard ผู้ใหญ่บ้าน: จำนวนเรื่องและงบที่อนุมัติแล้ว แยกตามแทงค์น้ำ
+// Dashboard หมู่บ้าน (ผู้ใหญ่บ้าน/เจ้าหน้าที่หมู่บ้าน): จำนวนเรื่องและงบที่อนุมัติแล้ว แยกตามแทงค์น้ำ
 class VillageHeadDashboardScreen extends StatefulWidget {
   const VillageHeadDashboardScreen({super.key});
 
@@ -197,7 +199,7 @@ class _VillageHeadDashboardScreenState extends State<VillageHeadDashboardScreen>
           const SizedBox(width: 8),
           const Expanded(
             child: Text(
-              'ภาพรวมสถิติผู้ใหญ่บ้าน',
+              'ภาพรวมสถิติหมู่บ้าน',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
@@ -298,15 +300,45 @@ class _VillageHeadDashboardScreenState extends State<VillageHeadDashboardScreen>
             .toList();
       }
 
+      if (kIsWeb) {
+        // เว็บไม่มีตัวแปลง HTML -> PDF ให้เปิดรายงานเป็นหน้าเว็บในแท็บใหม่แทน
+        // ผู้ใช้กด Print ของเบราว์เซอร์ (Ctrl+P) -> Save as PDF เอง
+        final html = DashboardPdfService.buildHtml(
+          title: 'ภาพรวมสถิติหมู่บ้าน',
+          periodLabel: _selected?.label ?? '',
+          totalReports: data.totalReports,
+          totalBudget: data.totalBudget,
+          donutTitle: 'เรื่องที่อนุมัติแล้ว แยกตามแทงค์น้ำ',
+          donutRows: donutRows,
+          donutImageDataUrl: donutImage,
+          barTitle: 'งบหมู่บ้าน แยกตามแทงค์น้ำ',
+          barRows: barRows,
+          barImageDataUrl: barImage,
+          showSinglePeriodSections: !comparing,
+          olderLabel: olderLabel,
+          olderTotalReports: olderTotalReports,
+          olderTotalBudget: olderTotalBudget,
+          newerLabel: newerLabel,
+          newerTotalReports: newerTotalReports,
+          newerTotalBudget: newerTotalBudget,
+          compareBarBreakdown: comparing ? compareBreakdown : null,
+          compareBarImageDataUrl: compareBarImage,
+        );
+        if (!mounted) return;
+        setState(() => _printing = false);
+        await openHtmlForPrint(html);
+        return;
+      }
+
       final bytes = await DashboardPdfService.build(
-        title: 'ภาพรวมสถิติผู้ใหญ่บ้าน',
+        title: 'ภาพรวมสถิติหมู่บ้าน',
         periodLabel: _selected?.label ?? '',
         totalReports: data.totalReports,
         totalBudget: data.totalBudget,
         donutTitle: 'เรื่องที่อนุมัติแล้ว แยกตามแทงค์น้ำ',
         donutRows: donutRows,
         donutImageDataUrl: donutImage,
-        barTitle: 'งบผู้ใหญ่บ้าน แยกตามแทงค์น้ำ',
+        barTitle: 'งบหมู่บ้าน แยกตามแทงค์น้ำ',
         barRows: barRows,
         barImageDataUrl: barImage,
         showSinglePeriodSections: !comparing,
@@ -550,7 +582,7 @@ class _VillageHeadDashboardScreenState extends State<VillageHeadDashboardScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'งบผู้ใหญ่บ้าน แยกตามแทงค์น้ำ',
+            'งบหมู่บ้าน แยกตามแทงค์น้ำ',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.bold,
@@ -1227,7 +1259,7 @@ class _VillageHeadDashboardScreenState extends State<VillageHeadDashboardScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            title ?? 'งบผู้ใหญ่บ้าน แยกตามแทงค์น้ำ',
+            title ?? 'งบหมู่บ้าน แยกตามแทงค์น้ำ',
             style: const TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.bold,
@@ -1237,7 +1269,7 @@ class _VillageHeadDashboardScreenState extends State<VillageHeadDashboardScreen>
           const SizedBox(height: 4),
           Text(
             subtitle ??
-                'งานที่อนุมัติเองนับเต็ม งานที่เทศบาลสมทบนับเฉพาะส่วนของผู้ใหญ่บ้าน',
+                'งานที่อนุมัติเองนับเต็ม งานที่เทศบาลสมทบนับเฉพาะส่วนของหมู่บ้าน',
             style: const TextStyle(color: AppColors.textGrey, fontSize: 12),
           ),
           const SizedBox(height: 20),

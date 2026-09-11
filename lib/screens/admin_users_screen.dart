@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import '../data/villages.dart';
 import '../services/admin_service.dart';
+import '../services/session.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_dialog.dart';
+import '../widgets/app_toast.dart';
 import 'addon_features_screen.dart';
 
 // หน้าจัดการผู้ใช้ (เฉพาะ admin)
@@ -615,6 +617,7 @@ class _RoleSheetState extends State<_RoleSheet> {
   String? _busyRole;
   String? _headVillage; // หมู่บ้านที่ผู้ใหญ่บ้านดูแล
   String? _officerVillage; // หมู่บ้านที่เจ้าหน้าที่ดูแล
+  bool _deleting = false;
 
   @override
   void initState() {
@@ -796,6 +799,86 @@ class _RoleSheetState extends State<_RoleSheet> {
     );
   }
 
+  // ลบบัญชีผู้ใช้ — ต้องกรอกรหัสยืนยันก่อน (กันกดพลาด)
+  // ลบแล้วย้อนกลับไม่ได้ ถ้าคนนี้เข้า LINE อีกครั้งจะต้องสมัครสมาชิกใหม่
+  // (ถ้ามีเรื่องแจ้งซ่อมผูกอยู่ จะล้างข้อมูลส่วนตัวแทนการลบทั้งบัญชี — ดู admin_service.dart)
+  Future<void> _confirmDelete() async {
+    final codeCtrl = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('ลบบัญชีผู้ใช้'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'ลบ ${widget.user.fullName} ออกจากระบบ (สิทธิ์และข้อมูลโปรไฟล์)\n'
+              'ย้อนกลับไม่ได้ — ถ้าคนนี้เข้าสู่ระบบด้วย LINE อีกครั้ง '
+              'จะต้องสมัครสมาชิกใหม่ทั้งหมด\n\n'
+              'ถ้าคนนี้เคยแจ้งซ่อมไว้ ระบบจะลบแค่ข้อมูลส่วนตัวออก '
+              '(ชื่อจะกลายเป็น "ผู้ใช้ที่ถูกลบ") '
+              'แต่เรื่องแจ้งซ่อมเดิมจะยังอยู่ ไม่ถูกลบไปด้วย',
+              style: const TextStyle(fontSize: 13.5, height: 1.5),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: codeCtrl,
+              obscureText: true,
+              autofocus: true,
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+              decoration: const InputDecoration(
+                labelText: 'รหัสยืนยัน',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ยกเลิก',
+                style: TextStyle(color: AppColors.textGrey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, codeCtrl.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD9534F),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('ลบบัญชี'),
+          ),
+        ],
+      ),
+    );
+    codeCtrl.dispose();
+
+    if (code == null || code.isEmpty || !mounted) return;
+
+    setState(() => _deleting = true);
+    try {
+      final anonymized = await AdminService.deleteUser(widget.user.id, code);
+      if (!mounted) return;
+      AppToast.show(
+        context,
+        anonymized
+            ? 'มีเรื่องแจ้งซ่อมผูกอยู่ ลบได้แค่ข้อมูลส่วนตัว'
+            : 'ลบบัญชีแล้ว',
+      );
+      widget.onChanged();
+      Navigator.pop(context); // ปิดแผงนี้ กลับไปหน้ารายชื่อ
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      AppDialog.error(context, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -928,6 +1011,35 @@ class _RoleSheetState extends State<_RoleSheet> {
                   style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
+          if (widget.user.id != AppSession.profileId &&
+              !widget.user.roles.contains('admin')) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _deleting ? null : _confirmDelete,
+                icon: _deleting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.2, color: Color(0xFFD9534F)))
+                    : const Icon(Icons.delete_outline,
+                        color: Color(0xFFD9534F)),
+                label: Text(_deleting ? 'กำลังลบ...' : 'ลบบัญชีผู้ใช้',
+                    style: const TextStyle(
+                        color: Color(0xFFD9534F),
+                        fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFD9534F)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

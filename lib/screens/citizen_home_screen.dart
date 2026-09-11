@@ -86,8 +86,14 @@ final Map<UserRole, List<MenuItemData>> _roleMenus = {
       iconColor: Color(0xFFD84A85),
       label: 'สร้างประกาศ',
     ),
+    MenuItemData(
+      icon: Icons.dashboard,
+      circleColor: Color(0xFFEAE0FB),
+      iconColor: AppColors.primary,
+      label: 'Dashboard',
+    ),
     // เมนูอื่นของเจ้าหน้าที่ (ตาม diagram) รอ Figma แล้วค่อยเพิ่มที่นี่ เช่น:
-    // รับเรื่องแจ้งซ่อม / อัปเดตสถานะการซ่อม / จัดการข้อมูลประปา / Dashboard
+    // จัดการข้อมูลประปา
   ],
   // ผู้ใหญ่บ้าน
   UserRole.villageHead: const [
@@ -699,20 +705,22 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen>
         );
         _loadMenuCounts();
       case 'Dashboard':
-        // ถ้ามี role เทศบาล ให้เปิด Dashboard เทศบาลก่อน
-        // ถ้าเป็นผู้ใหญ่บ้าน ให้เปิด Dashboard ที่กรองเฉพาะหมู่บ้านตัวเอง
-        if (widget.roles.contains(UserRole.palad) ||
-            widget.roles.contains(UserRole.admin)) {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const PaladDashboardScreen()),
-          );
-        } else if (widget.roles.contains(UserRole.villageHead)) {
+        // เช็คผู้ใหญ่บ้าน/เจ้าหน้าที่หมู่บ้านก่อน (role เจาะจงหมู่บ้านตัวเอง)
+        // เพื่อไม่ให้คนที่มี role admin ติดมาด้วย (เช่น admin ที่เพิ่มสิทธิ์ผู้ใหญ่บ้านให้ตัวเองไว้ทดสอบ)
+        // ถูกเด้งไปหน้าเทศบาลทั้งที่ควรเห็น Dashboard เฉพาะหมู่บ้าน/แทงค์ของตัวเอง
+        if (widget.roles.contains(UserRole.villageHead) ||
+            widget.roles.contains(UserRole.officer)) {
           await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => const VillageHeadDashboardScreen(),
             ),
+          );
+        } else if (widget.roles.contains(UserRole.palad) ||
+            widget.roles.contains(UserRole.admin)) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const PaladDashboardScreen()),
           );
         }
       default:

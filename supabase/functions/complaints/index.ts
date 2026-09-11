@@ -11,6 +11,9 @@ const LINE_CHANNEL_ID = Deno.env.get('LINE_CHANNEL_ID')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const PUSH_SECRET = Deno.env.get('PUSH_SECRET') ?? '';
+// รหัสยืนยันก่อนปิดเรื่องแบบ "ไม่พบปัญหา" (กันกดพลาด เพราะย้อนกลับไม่ได้)
+const REJECT_COMPLAINT_CONFIRM_CODE =
+  Deno.env.get('REJECT_COMPLAINT_CONFIRM_CODE') ?? '';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -434,6 +437,84 @@ Deno.serve(async (req) => {
         }
 
         return json({ success: true, complaint: data });
+      }
+
+      // ปิดเรื่องแบบ "ไม่พบปัญหา" (เจ้าหน้าที่ลงพื้นที่ประเมินแล้วไม่เจอปัญหาจริง)
+      // ต้องกรอกเหตุผล + รหัสยืนยันก่อน กันกดพลาด (ปิดแล้วย้อนกลับไม่ได้)
+      case 'reject-complaint': {
+        if (!isOfficer) {
+          return json({ error: 'เฉพาะเจ้าหน้าที่เท่านั้น' }, 403);
+        }
+
+        const complaintId = body.complaintId as string | undefined;
+        const reason = ((body.reason as string | undefined) ?? '').trim();
+        const code = (body.code as string | undefined) ?? '';
+
+        if (!complaintId || reason.length === 0) {
+          return json({ error: 'ข้อมูลไม่ครบ' }, 400);
+        }
+
+        if (REJECT_COMPLAINT_CONFIRM_CODE.length === 0 ||
+            code !== REJECT_COMPLAINT_CONFIRM_CODE) {
+          return json({ error: 'รหัสยืนยันไม่ถูกต้อง' }, 403);
+        }
+
+        const { data: current, error: fetchErr } = await admin
+          .from('complaints')
+          .select('status, reporter_id, water_tanks(name, village, moo)')
+          .eq('id', complaintId)
+          .single();
+
+        if (fetchErr || !current) {
+          return json({ error: 'ไม่พบเรื่องร้องเรียน' }, 404);
+        }
+
+        const curTank = current.water_tanks as
+          { name?: string; village?: string; moo?: number } | null;
+
+        if (!officerVillage || curTank?.village !== officerVillage) {
+          return json(
+            { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
+            403,
+          );
+        }
+
+        if (current.status !== 'surveying') {
+          return json(
+            { error: 'ปิดเรื่องแบบนี้ได้เฉพาะขั้นลงพื้นที่ประเมินเท่านั้น' },
+            400,
+          );
+        }
+
+        const { error } = await admin
+          .from('complaints')
+          .update({
+            status: 'rejected',
+            survey_note: reason,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', complaintId);
+
+        if (error) {
+          return json({ error: 'บันทึกไม่สำเร็จ', detail: error.message }, 500);
+        }
+        await logStatus(admin, complaintId, 'rejected');
+
+        // แจ้งประชาชนที่แจ้งเรื่อง
+        if (current.reporter_id) {
+          const tankLabel = curTank
+            ? `${curTank.name} หมู่ ${curTank.moo} ${curTank.village}`
+            : '';
+          sendPush({
+            profileIds: [current.reporter_id as string],
+            title: 'ตรวจสอบแล้วไม่พบปัญหา',
+            body: tankLabel.length > 0
+              ? `เจ้าหน้าที่ลงพื้นที่ตรวจสอบ ${tankLabel} แล้วไม่พบปัญหาที่แจ้ง`
+              : 'เจ้าหน้าที่ลงพื้นที่ตรวจสอบแล้วไม่พบปัญหาที่แจ้ง',
+          });
+        }
+
+        return json({ success: true });
       }
 
       // บันทึกรายการวัสดุ (เจ้าหน้าที่ กรอกตอนลงพื้นที่ประเมิน)
@@ -948,14 +1029,16 @@ Deno.serve(async (req) => {
 
       // เช็คว่า token ยังใช้ได้ไหม + คืนข้อมูลล่าสุด
       // ใช้ตอนเปิดแอป (auto login) — ได้ role ล่าสุดด้วยถ้า admin เปลี่ยนให้
-      // ===== Dashboard ผู้ใหญ่บ้าน =====
+      // ===== Dashboard หมู่บ้าน (ผู้ใหญ่บ้าน / เจ้าหน้าที่หมู่บ้าน) =====
       // นับเฉพาะงานที่อนุมัติครบแล้วและเข้าสถานะ repairing
-      // แยกจำนวนเรื่องและงบที่ผู้ใหญ่บ้านรับผิดชอบตามแทงค์น้ำ
+      // แยกจำนวนเรื่องและงบที่หมู่บ้านรับผิดชอบตามแทงค์น้ำ
       case 'village-head-dashboard': {
-        if (!isVillageHead) {
-          return json({ error: 'เฉพาะผู้ใหญ่บ้านเท่านั้น' }, 403);
+        if (!isVillageHead && !isOfficer) {
+          return json({ error: 'เฉพาะผู้ใหญ่บ้านหรือเจ้าหน้าที่หมู่บ้านเท่านั้น' }, 403);
         }
-        if (!headVillage) {
+        // ผู้ใหญ่บ้านดูตามหมู่บ้านที่ดูแล (headVillage) / เจ้าหน้าที่ดูตามหมู่บ้านที่รับผิดชอบ (officerVillage)
+        const village = isVillageHead ? headVillage : officerVillage;
+        if (!village) {
           return json({ error: 'ยังไม่ได้กำหนดหมู่บ้านที่ดูแล' }, 400);
         }
 
@@ -1017,7 +1100,7 @@ Deno.serve(async (req) => {
           for (const c of comps ?? []) {
             const tank = c.water_tanks as
               { name?: string; village?: string } | null;
-            if (tank?.village !== headVillage) continue;
+            if (tank?.village !== village) continue;
 
             complaintInfo.set(c.id as string, {
               tankId: (c.tank_id as string | null) ?? 'unknown',
@@ -1088,7 +1171,7 @@ Deno.serve(async (req) => {
 
         return json({
           success: true,
-          village: headVillage,
+          village,
           donut,
           bar,
           totalReports,

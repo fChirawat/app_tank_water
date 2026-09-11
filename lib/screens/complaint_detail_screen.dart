@@ -94,6 +94,134 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
     if (ok == true) _advance();
   }
 
+  // ปิดเรื่องแบบ "ไม่พบปัญหา" (ลงพื้นที่ตรวจสอบแล้วไม่เจอปัญหาจริง)
+  // ต้องกรอกผลตรวจสอบ + รหัสยืนยันก่อน — ปิดแล้วย้อนกลับมาแก้ไขไม่ได้
+  // เช็ครหัสในหน้านี้เลย (ไม่ปิด dialog ก่อน) เพื่อให้เห็น error ชัดๆ ถ้ารหัสผิด
+  // และไม่ต้องกรอกผลตรวจสอบใหม่ถ้าแค่พิมพ์รหัสผิด
+  Future<void> _confirmReject() async {
+    final reasonCtrl = TextEditingController(
+      text: 'ไปตรวจสอบแล้วไม่เจอปัญหาที่แจ้ง',
+    );
+    final codeCtrl = TextEditingController();
+    String? dialogError;
+    bool submitting = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('ปิดเรื่อง: ไม่พบปัญหาจริง'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'เมื่อปิดเรื่องแล้ว จะย้อนกลับมาแก้ไขไม่ได้',
+                  style: TextStyle(fontSize: 13.5, color: AppColors.textGrey),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'ผลตรวจสอบ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: codeCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'รหัสยืนยัน',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (dialogError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(dialogError!,
+                      style: const TextStyle(
+                          color: Color(0xFFD9534F), fontSize: 12.5)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: submitting ? null : () => Navigator.pop(ctx, false),
+              child: const Text('ยกเลิก',
+                  style: TextStyle(color: AppColors.textGrey)),
+            ),
+            ElevatedButton(
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      if (reasonCtrl.text.trim().isEmpty) {
+                        setDialogState(
+                            () => dialogError = 'กรุณากรอกผลตรวจสอบ');
+                        return;
+                      }
+                      if (codeCtrl.text.isEmpty) {
+                        setDialogState(
+                            () => dialogError = 'กรุณากรอกรหัสยืนยัน');
+                        return;
+                      }
+                      setDialogState(() {
+                        submitting = true;
+                        dialogError = null;
+                      });
+                      try {
+                        await ComplaintService.rejectComplaint(
+                          widget.complaint.id,
+                          reasonCtrl.text.trim(),
+                          codeCtrl.text,
+                        );
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx, true);
+                      } catch (e) {
+                        setDialogState(() {
+                          submitting = false;
+                          dialogError = _cleanError(e);
+                        });
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFD9534F),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: submitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2.4),
+                    )
+                  : const Text('ยืนยันปิดเรื่อง'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    reasonCtrl.dispose();
+    codeCtrl.dispose();
+
+    if (ok != true || !mounted) return;
+
+    setState(() {
+      _status = ComplaintStatus.rejected;
+      _changed = true;
+    });
+    AppToast.show(context, 'ปิดเรื่องแล้ว');
+  }
+
   // เดินสถานะไปสเต็ปถัดไป (Edge Function เป็นคนตัดสินว่าไปไหนต่อ)
   Future<void> _advance() async {
     setState(() => _busy = true);
@@ -346,12 +474,15 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
       case ComplaintStatus.received:
         return _mainButton('ลงพื้นที่ประเมิน', _advance);
 
-      // ลงพื้นที่ประเมิน -> กรอกวัสดุ + ส่งอนุมัติงบ
+      // ลงพื้นที่ประเมิน -> กรอกวัสดุ + ส่งอนุมัติงบ (หรือปิดเรื่องถ้าไม่พบปัญหา)
       case ComplaintStatus.surveying:
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             _outlineButton('กรอกรายละเอียด', Icons.list_alt, _openItems),
+            const SizedBox(height: 10),
+            _outlineButton('ไม่พบปัญหา', Icons.search_off, _confirmReject,
+                color: const Color(0xFFD9534F)),
             const SizedBox(height: 10),
             // ยังไม่บันทึกรายละเอียด -> ปุ่มเทา กดแล้วเตือน
             _itemsSaved
@@ -381,7 +512,8 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
       case ComplaintStatus.done:
         return _lockedBar('ซ่อมเสร็จเรียบร้อยแล้ว', color: const Color(0xFF5CB888));
       case ComplaintStatus.rejected:
-        return _lockedBar('เรื่องนี้ถูกปฏิเสธ', color: const Color(0xFFD9534F));
+        return _lockedBar('ตรวจสอบแล้วไม่พบปัญหาจริง',
+            color: const Color(0xFFD9534F));
     }
   }
 
@@ -486,7 +618,8 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
     );
   }
 
-  Widget _outlineButton(String label, IconData icon, VoidCallback onTap) {
+  Widget _outlineButton(String label, IconData icon, VoidCallback onTap,
+      {Color color = AppColors.primary}) {
     return SizedBox(
       width: double.infinity,
       height: 48,
@@ -496,8 +629,8 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
         label: Text(label,
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.primary,
-          side: const BorderSide(color: AppColors.primary, width: 1.4),
+          foregroundColor: color,
+          side: BorderSide(color: color, width: 1.4),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),

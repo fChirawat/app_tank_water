@@ -22,6 +22,8 @@ const FEATURE_UNLOCK_CODES: Record<string, string> = {
   'scheduled_announcement':
     Deno.env.get('SCHEDULED_ANNOUNCEMENT_UNLOCK_CODE') ?? '',
 };
+// รหัสยืนยันก่อนลบบัญชีผู้ใช้ (กันกดลบพลาด) — เก็บเป็น secret ฝั่งเซิร์ฟเวอร์เท่านั้น
+const ADMIN_DELETE_CONFIRM_CODE = Deno.env.get('ADMIN_DELETE_CONFIRM_CODE') ?? '';
 
 // role ที่ admin แต่งตั้งให้คนอื่นได้ (ไม่รวม admin, citizen)
 const ASSIGNABLE_ROLES = ['officer', 'village_head', 'palad'];
@@ -117,6 +119,9 @@ Deno.serve(async (req) => {
             'id, title, first_name, last_name, house_no, village, avatar_url',
             { count: 'exact' },
           )
+          // ซ่อนบัญชีที่ถูกลบไปแล้ว (ล้างข้อมูลส่วนตัวแต่เก็บแถวไว้เพราะมีเรื่อง
+          // แจ้งซ่อมผูกอยู่ — ดู action 'delete-user') ออกจากรายการค้นหา
+          .not('line_user_id', 'like', 'deleted:%')
           .order('created_at', { ascending: false });
 
         // กรองเฉพาะช่องที่กรอกมา
@@ -273,6 +278,90 @@ Deno.serve(async (req) => {
         }
 
         return json({ success: true });
+      }
+
+      // ===== ลบบัญชีผู้ใช้ (ต้องกรอกรหัสยืนยันก่อน) =====
+      // ลบ role + รหัสเครื่อง(แจ้งเตือน) เสมอ
+      // - ไม่มีเรื่องแจ้งซ่อมผูกอยู่ -> ลบโปรไฟล์ทิ้งทั้งแถว (เหมือนผู้ใช้ใหม่ถ้าล็อกอินซ้ำ)
+      // - มีเรื่องแจ้งซ่อมผูกอยู่ (complaints.reporter_id) -> ลบทั้งแถวไม่ได้ (ชน foreign key)
+      //   จึงล้างข้อมูลส่วนตัวออกแทน (anonymize) แต่ "เก็บแถวโปรไฟล์ไว้" เพื่อไม่ให้
+      //   เรื่องแจ้งซ่อมที่ยังไม่จบพังไปด้วย — คนอื่น (เจ้าหน้าที่/ผู้ใหญ่บ้าน/ปลัด)
+      //   ยังทำงานกับเรื่องนั้นได้ตามปกติ แค่ชื่อผู้แจ้งจะโชว์เป็น "ผู้ใช้ที่ถูกลบ"
+      case 'delete-user': {
+        const targetId = body.profileId as string | undefined;
+        const code = (body.code as string | undefined) ?? '';
+
+        if (!targetId) return json({ error: 'ข้อมูลไม่ครบ' }, 400);
+
+        if (ADMIN_DELETE_CONFIRM_CODE.length === 0 ||
+            code !== ADMIN_DELETE_CONFIRM_CODE) {
+          return json({ error: 'รหัสยืนยันไม่ถูกต้อง' }, 403);
+        }
+
+        if (targetId === me.id) {
+          return json({ error: 'ลบบัญชีของตัวเองไม่ได้' }, 400);
+        }
+
+        const { data: targetRoles } = await admin
+          .from('user_roles')
+          .select('role')
+          .eq('profile_id', targetId);
+
+        if ((targetRoles ?? []).some((r) => r.role === 'admin')) {
+          return json({ error: 'ลบบัญชีผู้ดูแลระบบไม่ได้' }, 403);
+        }
+
+        // ลบรหัสเครื่อง(แจ้งเตือน) + role ก่อน กันเหลือข้อมูลค้าง
+        await admin.from('device_tokens').delete().eq('profile_id', targetId);
+        await admin.from('user_roles').delete().eq('profile_id', targetId);
+
+        // เช็คก่อนว่ามีเรื่องแจ้งซ่อมผูกกับคนนี้อยู่ไหม (ทุกสถานะ ไม่ใช่แค่ที่ยังไม่จบ)
+        const { count: complaintCount } = await admin
+          .from('complaints')
+          .select('id', { count: 'exact', head: true })
+          .eq('reporter_id', targetId);
+
+        if ((complaintCount ?? 0) > 0) {
+          // มีเรื่องผูกอยู่ -> ลบทั้งแถวไม่ได้ ล้างข้อมูลส่วนตัวออกแทน
+          // ใช้ค่าว่าง/placeholder แทน null ทุกช่อง กันชนกับ NOT NULL constraint
+          // line_user_id ใส่ค่าปลอมที่ไม่ซ้ำใคร (กันชน unique) แทนการเว้นว่าง
+          // เพื่อไม่ให้ LINE account เดิม login ซ้ำมาเจอโปรไฟล์นี้ได้อีก
+          const { error: anonErr } = await admin
+            .from('profiles')
+            .update({
+              title: '',
+              first_name: 'ผู้ใช้ที่ถูกลบ',
+              last_name: '',
+              house_no: '',
+              village: '',
+              avatar_url: '',
+              line_user_id: `deleted:${targetId}`,
+            })
+            .eq('id', targetId);
+
+          if (anonErr) {
+            return json(
+              { error: `ลบไม่สำเร็จ: ${anonErr.message}` },
+              500,
+            );
+          }
+
+          return json({ success: true, anonymized: true });
+        }
+
+        // ไม่มีเรื่องผูกอยู่ -> ลบโปรไฟล์ทิ้งทั้งแถว
+        const { error: delErr } = await admin
+          .from('profiles')
+          .delete()
+          .eq('id', targetId);
+
+        if (delErr) {
+          return json({
+            error: `ลบไม่สำเร็จ: ${delErr.message}`,
+          }, 500);
+        }
+
+        return json({ success: true, anonymized: false });
       }
 
       // ===== เช็ครหัสปลดล็อกฟีเจอร์เสริม (ระบุ featureId ว่าจะปลดล็อกตัวไหน) =====

@@ -51,5 +51,9 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Android 11+ (API 30+) ต้องประกาศแอปที่จะเช็ค/เปิดไว้ก่อน
+             ไม่งั้น LINE SDK จะเช็คไม่ได้ว่าเครื่องมีแอป LINE ติดตั้งอยู่ไหม
+             ทำให้ตอนล็อกอินสลับไปแอป LINE แล้วไม่เด้งกลับมาแอปเรา -->
+        <package android:name="jp.naver.line.android"/>
     </queries>
 </manifest>
