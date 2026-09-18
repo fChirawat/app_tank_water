@@ -333,7 +333,7 @@ Deno.serve(async (req) => {
               first_name: 'ผู้ใช้ที่ถูกลบ',
               last_name: '',
               house_no: '',
-              village: '',
+              village: null,
               avatar_url: '',
               line_user_id: `deleted:${targetId}`,
             })

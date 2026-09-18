@@ -21,7 +21,7 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
   final _searchController = TextEditingController();
 
   String _keyword = ''; // คำค้นหา
-  String _villageFilter = 'ทุกหมู่บ้าน'; // ตัวกรองหมู่บ้าน
+  int? _villageMooFilter; // ตัวกรองหมู่บ้าน (null = ทุกหมู่บ้าน)
 
   List<WaterTank> _tanks = [];
   bool _loading = true; // กำลังโหลดข้อมูลอยู่ไหม
@@ -31,28 +31,25 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
   void initState() {
     super.initState();
     // เริ่มต้นให้แสดงหมู่บ้านที่ผู้ใช้ลงทะเบียนไว้
-    _villageFilter = _myVillage() ?? 'ทุกหมู่บ้าน';
+    _villageMooFilter = _myMoo();
     _loadTanks();
   }
 
-  // หาหมู่บ้าน default ให้ตรงกับบทบาท
+  // หาหมู่บ้าน default ให้ตรงกับบทบาท (คืนเป็นเลขหมู่ กันชื่อซ้ำ 2 หมู่ปนกัน)
   // - ผู้ใหญ่บ้าน/เจ้าหน้าที่หมู่บ้าน -> หมู่บ้านที่ตัวเอง "ดูแล" (อาจไม่ใช่หมู่บ้านที่อยู่)
   // - ประชาชน/เจ้าหน้าที่เทศบาล -> หมู่บ้านที่อยู่อาศัยจากโปรไฟล์
-  // โปรไฟล์เก็บเป็น "หมู่ 1 บุญเรืองเหนือ" -> ตัดเอาแค่ชื่อหมู่บ้าน
-  String? _myVillage() {
+  // โปรไฟล์/officerVillage/headVillage เก็บเป็น "หมู่ 1 บ้านบุญเรืองเหนือ" -> ตัดเอาเลขหมู่
+  int? _myMoo() {
     if (AppSession.isOfficer && AppSession.officerVillage != null) {
-      return AppSession.officerVillage;
+      return mooFromLabel(AppSession.officerVillage);
     }
     if (AppSession.isVillageHead && AppSession.headVillage != null) {
-      return AppSession.headVillage;
+      return mooFromLabel(AppSession.headVillage);
     }
 
     final v = AppSession.profile?['village'] as String?;
     if (v == null || v.isEmpty) return null;
-    for (final name in kVillages) {
-      if (v.contains(name)) return name;
-    }
-    return null;
+    return mooFromLabel(v);
   }
 
   // ===== โหลดข้อมูลจาก PostgreSQL =====
@@ -87,7 +84,7 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
   List<WaterTank> get _filtered {
     return _tanks.where((t) {
       final matchVillage =
-          _villageFilter == 'ทุกหมู่บ้าน' || t.village == _villageFilter;
+          _villageMooFilter == null || t.moo == _villageMooFilter;
       final kw = _keyword.trim();
       final matchKeyword = kw.isEmpty ||
           t.name.contains(kw) ||
@@ -234,8 +231,10 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
   bool get _canEdit => AppSession.isOfficer;
 
   // แก้ไข/ลบได้เฉพาะแทงค์ในหมู่บ้านที่ตัวเองดูแลเท่านั้น (กันเห็นปุ่มของหมู่บ้านอื่น)
+  // เทียบด้วยเลขหมู่ ไม่ใช่ชื่อ (ชื่อหมู่บ้านซ้ำกันได้ระหว่าง 2 หมู่)
   bool _canEditTank(WaterTank tank) =>
-      AppSession.isOfficer && tank.village == AppSession.officerVillage;
+      AppSession.isOfficer &&
+      tank.moo == mooFromLabel(AppSession.officerVillage);
 
   // เปิดหน้าแก้ไขแทงค์ แล้วโหลดรายการใหม่ถ้าแก้สำเร็จ
   Future<void> _openEdit(WaterTank tank) async {
@@ -314,15 +313,19 @@ class _WaterTankListScreenState extends State<WaterTankListScreen> {
         border: Border.all(color: AppColors.border),
       ),
       child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _villageFilter,
+        child: DropdownButton<int?>(
+          value: _villageMooFilter,
           isExpanded: true,
           icon: const Icon(Icons.keyboard_arrow_down,
               color: AppColors.textGrey),
-          items: ['ทุกหมู่บ้าน', ...kVillages].map((v) {
-            return DropdownMenuItem<String>(value: v, child: Text(v));
-          }).toList(),
-          onChanged: (v) => setState(() => _villageFilter = v!),
+          items: [
+            const DropdownMenuItem<int?>(value: null, child: Text('ทุกหมู่บ้าน')),
+            ...kVillageMooMap.keys.map((moo) {
+              return DropdownMenuItem<int?>(
+                  value: moo, child: Text(villageLabelOfMoo(moo)));
+            }),
+          ],
+          onChanged: (moo) => setState(() => _villageMooFilter = moo),
         ),
       ),
     );

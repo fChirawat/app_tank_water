@@ -94,6 +94,10 @@ Deno.serve(async (req) => {
     // หมู่บ้านที่เจ้าหน้าที่คนนี้ดูแล
     const officerRow = (roleRows ?? []).find((r) => r.role === 'officer');
     const officerVillage = (officerRow?.village as string | undefined) ?? null;
+    // เลขหมู่ที่แท้จริง (กันชื่อหมู่บ้านซ้ำกัน 2 หมู่ปนกัน) — ใช้เทียบกับ
+    // water_tanks.moo แทนชื่อ village เสมอ เมื่อต้องเช็คสิทธิ์ตามหมู่บ้าน
+    const headMoo = mooFromLabel(headVillage);
+    const officerMoo = mooFromLabel(officerVillage);
 
     // ===== 5) ทำงานตามที่สั่ง =====
     switch (action) {
@@ -181,7 +185,7 @@ Deno.serve(async (req) => {
 
         sendPush({
           roles: ['officer'],
-          village: tankName?.village,
+          moo: tankName?.moo,
           title: 'มีเรื่องแจ้งซ่อมใหม่',
           body: tankName
             ? `${complaint.problemType} — ${tankName.name} หมู่ ${tankName.moo} ${tankName.village}`
@@ -220,10 +224,10 @@ Deno.serve(async (req) => {
         // action 'list' เป็นของเมนูเจ้าหน้าที่ (รับเรื่อง + อัปเดตสถานะ) เท่านั้น
         // จึงกรองตามหมู่บ้านของเจ้าหน้าที่เสมอ ไม่เกี่ยวกับ role อื่นที่มี
         // (ผู้ใหญ่บ้าน/เทศบาล ใช้ action แยก: village-head-list / palad-list)
-        if (isOfficer && officerVillage) {
+        if (isOfficer && officerMoo != null) {
           list = list.filter((c) => {
-            const tank = c.water_tanks as { village?: string } | null;
-            return tank?.village === officerVillage;
+            const tank = c.water_tanks as { moo?: number } | null;
+            return tank?.moo === officerMoo;
           });
         }
 
@@ -267,16 +271,17 @@ Deno.serve(async (req) => {
       // ดูสถานะประปา: แทงค์ในหมู่บ้าน + เรื่องร้องเรียนล่าสุดของแต่ละแทงค์
       // ทุกคนดูได้ (ไม่ต้องเป็นเจ้าหน้าที่)
       case 'tank-status': {
-        const village = (body.village as string | undefined) ?? '';
+        // กรองด้วยเลขหมู่ (moo) เสมอ ไม่ใช่ชื่อ เพราะชื่อหมู่บ้านซ้ำกันได้ระหว่าง 2 หมู่
+        const moo = body.moo as number | undefined;
 
-        // ดึงแทงค์ตามหมู่บ้าน (ว่าง = ทุกหมู่บ้าน)
+        // ดึงแทงค์ตามหมู่บ้าน (ไม่ระบุ = ทุกหมู่บ้าน)
         let tankQuery = admin
           .from('water_tanks')
           .select('id, name, type, village, moo, lat, lng, image_urls')
           .order('created_at', { ascending: false });
 
-        if (village.length > 0) {
-          tankQuery = tankQuery.eq('village', village);
+        if (moo != null) {
+          tankQuery = tankQuery.eq('moo', moo);
         }
 
         const { data: tanks, error: tankErr } = await tankQuery;
@@ -324,7 +329,7 @@ Deno.serve(async (req) => {
         // ดึงสถานะปัจจุบัน + หมู่บ้านของแทงค์ก่อน
         const { data: current, error: fetchErr } = await admin
           .from('complaints')
-          .select('status, water_tanks(village)')
+          .select('status, water_tanks(village, moo)')
           .eq('id', complaintId)
           .single();
 
@@ -333,8 +338,8 @@ Deno.serve(async (req) => {
         }
 
         // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันเดินสถานะเรื่องหมู่บ้านอื่น)
-        const curTank = current.water_tanks as { village?: string } | null;
-        if (!officerVillage || curTank?.village !== officerVillage) {
+        const curTank = current.water_tanks as { moo?: number } | null;
+        if (officerMoo == null || curTank?.moo !== officerMoo) {
           return json(
             { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
             403,
@@ -415,7 +420,7 @@ Deno.serve(async (req) => {
           // แจ้งผู้ใหญ่บ้านของหมู่บ้านนั้น
           sendPush({
             roles: ['village_head'],
-            village: tk?.village,
+            moo: tk?.moo,
             title: 'มีเรื่องรออนุมัติงบ',
             body: tankLabel.length > 0
                 ? `เจ้าหน้าที่ส่งขออนุมัติงบ — ${tankLabel}`
@@ -472,7 +477,7 @@ Deno.serve(async (req) => {
         const curTank = current.water_tanks as
           { name?: string; village?: string; moo?: number } | null;
 
-        if (!officerVillage || curTank?.village !== officerVillage) {
+        if (officerMoo == null || curTank?.moo !== officerMoo) {
           return json(
             { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
             403,
@@ -537,12 +542,12 @@ Deno.serve(async (req) => {
         // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันแก้วัสดุเรื่องหมู่บ้านอื่น)
         const { data: itemsCpCheck } = await admin
           .from('complaints')
-          .select('id, water_tanks(village)')
+          .select('id, water_tanks(moo)')
           .eq('id', complaintId)
           .maybeSingle();
-        const itemsCpVillage =
-          (itemsCpCheck?.water_tanks as { village?: string } | null)?.village;
-        if (!itemsCpCheck || !officerVillage || itemsCpVillage !== officerVillage) {
+        const itemsCpMoo =
+          (itemsCpCheck?.water_tanks as { moo?: number } | null)?.moo;
+        if (!itemsCpCheck || officerMoo == null || itemsCpMoo !== officerMoo) {
           return json(
             { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
             403,
@@ -588,14 +593,14 @@ Deno.serve(async (req) => {
         if (!isPalad) {
           const { data: getItemsCpCheck } = await admin
             .from('complaints')
-            .select('id, water_tanks(village)')
+            .select('id, water_tanks(moo)')
             .eq('id', complaintId)
             .maybeSingle();
-          const getItemsCpVillage =
-            (getItemsCpCheck?.water_tanks as { village?: string } | null)?.village;
+          const getItemsCpMoo =
+            (getItemsCpCheck?.water_tanks as { moo?: number } | null)?.moo;
           const allowed =
-            (isOfficer && getItemsCpVillage === officerVillage) ||
-            (isVillageHead && getItemsCpVillage === headVillage);
+            (isOfficer && officerMoo != null && getItemsCpMoo === officerMoo) ||
+            (isVillageHead && headMoo != null && getItemsCpMoo === headMoo);
           if (!getItemsCpCheck || !allowed) {
             return json({ error: 'ไม่มีสิทธิ์ดูข้อมูลนี้' }, 403);
           }
@@ -640,12 +645,12 @@ Deno.serve(async (req) => {
         // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันบันทึกเรื่องหมู่บ้านอื่น)
         const { data: addLogCpCheck } = await admin
           .from('complaints')
-          .select('id, water_tanks(village)')
+          .select('id, water_tanks(moo)')
           .eq('id', complaintId)
           .maybeSingle();
-        const addLogCpVillage =
-          (addLogCpCheck?.water_tanks as { village?: string } | null)?.village;
-        if (!addLogCpCheck || !officerVillage || addLogCpVillage !== officerVillage) {
+        const addLogCpMoo =
+          (addLogCpCheck?.water_tanks as { moo?: number } | null)?.moo;
+        if (!addLogCpCheck || officerMoo == null || addLogCpMoo !== officerMoo) {
           return json(
             { error: 'จัดการได้เฉพาะเรื่องในหมู่บ้านที่ดูแลเท่านั้น' },
             403,
@@ -674,12 +679,12 @@ Deno.serve(async (req) => {
         // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันดูประวัติเรื่องหมู่บ้านอื่น)
         const { data: getLogsCpCheck } = await admin
           .from('complaints')
-          .select('id, water_tanks(village)')
+          .select('id, water_tanks(moo)')
           .eq('id', complaintId)
           .maybeSingle();
-        const getLogsCpVillage =
-          (getLogsCpCheck?.water_tanks as { village?: string } | null)?.village;
-        if (!getLogsCpCheck || !officerVillage || getLogsCpVillage !== officerVillage) {
+        const getLogsCpMoo =
+          (getLogsCpCheck?.water_tanks as { moo?: number } | null)?.moo;
+        if (!getLogsCpCheck || officerMoo == null || getLogsCpMoo !== officerMoo) {
           return json({ error: 'ไม่มีสิทธิ์ดูข้อมูลนี้' }, 403);
         }
 
@@ -725,8 +730,8 @@ Deno.serve(async (req) => {
 
         // กรองเฉพาะเรื่องที่แทงค์อยู่ในหมู่บ้านที่ดูแล
         const filtered = (data ?? []).filter((c) => {
-          const tank = c.water_tanks as { village?: string } | null;
-          return tank?.village === headVillage;
+          const tank = c.water_tanks as { moo?: number } | null;
+          return tank?.moo === headMoo;
         });
 
         return json({ success: true, complaints: filtered });
@@ -746,12 +751,12 @@ Deno.serve(async (req) => {
         // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันรับเรื่องหมู่บ้านอื่น)
         const { data: cpCheck } = await admin
           .from('complaints')
-          .select('id, water_tanks(village)')
+          .select('id, water_tanks(moo)')
           .eq('id', complaintId)
           .maybeSingle();
 
-        const cpVillage = (cpCheck?.water_tanks as { village?: string } | null)?.village;
-        if (!cpCheck || cpVillage !== headVillage) {
+        const cpMoo = (cpCheck?.water_tanks as { moo?: number } | null)?.moo;
+        if (!cpCheck || cpMoo !== headMoo) {
           return json({ error: 'ไม่มีสิทธิ์จัดการเรื่องนี้' }, 403);
         }
 
@@ -786,12 +791,12 @@ Deno.serve(async (req) => {
         // เช็คว่าเรื่องนี้อยู่ในหมู่บ้านที่ดูแลไหม (กันตัดสินงบเรื่องหมู่บ้านอื่น)
         const { data: cpCheck } = await admin
           .from('complaints')
-          .select('id, water_tanks(village)')
+          .select('id, water_tanks(moo)')
           .eq('id', complaintId)
           .maybeSingle();
 
-        const cpVillage = (cpCheck?.water_tanks as { village?: string } | null)?.village;
-        if (!cpCheck || cpVillage !== headVillage) {
+        const cpMoo = (cpCheck?.water_tanks as { moo?: number } | null)?.moo;
+        if (!cpCheck || cpMoo !== headMoo) {
           return json({ error: 'ไม่มีสิทธิ์จัดการเรื่องนี้' }, 403);
         }
 
@@ -808,6 +813,7 @@ Deno.serve(async (req) => {
 
           sendPush({
             roles: ['officer'],
+            moo: headMoo ?? undefined,
             title: 'งบอนุมัติแล้ว เริ่มซ่อมได้',
             body: 'ผู้ใหญ่บ้านอนุมัติงบประมาณแล้ว',
           });
@@ -906,8 +912,18 @@ Deno.serve(async (req) => {
         }
         await logStatus(admin, complaintId, 'repairing');
 
+        // หาหมู่บ้านของเรื่องนี้ ไว้แจ้งเฉพาะเจ้าหน้าที่หมู่บ้านนั้น
+        const { data: paladApproveCp } = await admin
+          .from('complaints')
+          .select('water_tanks(moo)')
+          .eq('id', complaintId)
+          .maybeSingle();
+        const paladApproveMoo =
+          (paladApproveCp?.water_tanks as { moo?: number } | null)?.moo;
+
         sendPush({
           roles: ['officer'],
+          moo: paladApproveMoo,
           title: 'เจ้าหน้าที่เทศบาลสมทบงบแล้ว เริ่มซ่อมได้',
           body: 'งบประมาณครบแล้ว สามารถเริ่มซ่อมได้',
         });
@@ -960,19 +976,19 @@ Deno.serve(async (req) => {
         // เจ้าหน้าที่: เรื่องรอรับ (pending) + กำลังดำเนินการ
         // กรองตามหมู่บ้านของเจ้าหน้าที่เสมอ (badge ของเมนูเจ้าหน้าที่)
         if (isOfficer) {
-          if (officerVillage) {
+          if (officerMoo != null) {
             const { data: pendRows } = await admin
               .from('complaints')
-              .select('id, water_tanks!inner(village)')
+              .select('id, water_tanks!inner(moo)')
               .eq('status', 'pending')
-              .eq('water_tanks.village', officerVillage);
+              .eq('water_tanks.moo', officerMoo);
             counts['receiveComplaint'] = (pendRows ?? []).length;
 
             const { data: repRows } = await admin
               .from('complaints')
-              .select('id, water_tanks!inner(village)')
+              .select('id, water_tanks!inner(moo)')
               .in('status', ['received', 'surveying', 'repairing'])
-              .eq('water_tanks.village', officerVillage);
+              .eq('water_tanks.moo', officerMoo);
             counts['repairStatus'] = (repRows ?? []).length;
           } else {
             // เจ้าหน้าที่ที่ยังไม่ผูกหมู่บ้าน -> นับทุกหมู่บ้าน
@@ -992,20 +1008,20 @@ Deno.serve(async (req) => {
 
         // ผู้ใหญ่บ้าน: รอรับเรื่อง (budget_wait) + รออนุมัติ (budget_review)
         // เฉพาะหมู่บ้านที่ดูแล
-        if (isVillageHead && headVillage) {
+        if (isVillageHead && headMoo != null) {
           // ต้อง join แทงค์เพื่อกรองหมู่บ้าน -> ดึงมานับเอง
           const { data: waitRows } = await admin
             .from('complaints')
-            .select('id, water_tanks!inner(village)')
+            .select('id, water_tanks!inner(moo)')
             .eq('status', 'budget_wait')
-            .eq('water_tanks.village', headVillage);
+            .eq('water_tanks.moo', headMoo);
           counts['headReceive'] = (waitRows ?? []).length;
 
           const { data: reviewRows } = await admin
             .from('complaints')
-            .select('id, water_tanks!inner(village)')
+            .select('id, water_tanks!inner(moo)')
             .eq('status', 'budget_review')
-            .eq('water_tanks.village', headVillage);
+            .eq('water_tanks.moo', headMoo);
           counts['budgetApprove'] = (reviewRows ?? []).length;
         }
 
@@ -1038,7 +1054,8 @@ Deno.serve(async (req) => {
         }
         // ผู้ใหญ่บ้านดูตามหมู่บ้านที่ดูแล (headVillage) / เจ้าหน้าที่ดูตามหมู่บ้านที่รับผิดชอบ (officerVillage)
         const village = isVillageHead ? headVillage : officerVillage;
-        if (!village) {
+        const villageMoo = isVillageHead ? headMoo : officerMoo;
+        if (!village || villageMoo == null) {
           return json({ error: 'ยังไม่ได้กำหนดหมู่บ้านที่ดูแล' }, 400);
         }
 
@@ -1090,7 +1107,7 @@ Deno.serve(async (req) => {
         if (approvedIds.size > 0) {
           const { data: comps, error: compsErr } = await admin
             .from('complaints')
-            .select('id, tank_id, shortfall, water_tanks(name, village)')
+            .select('id, tank_id, shortfall, water_tanks(name, village, moo)')
             .in('id', [...approvedIds]);
 
           if (compsErr) {
@@ -1099,8 +1116,8 @@ Deno.serve(async (req) => {
 
           for (const c of comps ?? []) {
             const tank = c.water_tanks as
-              { name?: string; village?: string } | null;
-            if (tank?.village !== village) continue;
+              { name?: string; village?: string; moo?: number } | null;
+            if (tank?.moo !== villageMoo) continue;
 
             complaintInfo.set(c.id as string, {
               tankId: (c.tank_id as string | null) ?? 'unknown',
@@ -1242,48 +1259,59 @@ Deno.serve(async (req) => {
         }
 
         // ===== ดึงข้อมูล complaint (village + shortfall) ของ id ที่เกี่ยวข้อง =====
+        // กลุ่มตาม "หมู่" (moo) เสมอ ไม่ใช่ชื่อ เพราะชื่อหมู่บ้านซ้ำกันได้ระหว่าง 2 หมู่
+        // (เช่น หมู่ 2 กับหมู่ 9 ชื่อ "บ้านบุญเรืองใต้" ทั้งคู่ กลุ่มตามชื่อจะปนกันผิด)
         const allIds = new Set<string>([...subsidizedIds]);
         const complaintInfo = new Map<
           string,
-          { village: string; shortfall: number }
+          { moo: number | null; village: string; shortfall: number }
         >();
 
         if (allIds.size > 0) {
           const { data: comps } = await admin
             .from('complaints')
-            .select('id, shortfall, water_tanks(village)')
+            .select('id, shortfall, water_tanks(village, moo)')
             .in('id', [...allIds]);
 
           for (const c of comps ?? []) {
-            const tank = c.water_tanks as { village?: string } | null;
+            const tank = c.water_tanks as { village?: string; moo?: number } | null;
+            const moo = tank?.moo ?? null;
+            const name = tank?.village ?? 'ไม่ระบุ';
             complaintInfo.set(c.id as string, {
-              village: tank?.village ?? 'ไม่ระบุ',
+              moo,
+              village: moo != null ? `หมู่ ${moo} ${name}` : name,
               shortfall: (c.shortfall as number | null) ?? 0,
             });
           }
         }
 
         // ===== วงกลม: นับเรื่องที่ส่งมาเทศบาล แยกหมู่บ้าน =====
-        const donutMap = new Map<string, number>();
+        const donutMap = new Map<string, { village: string; count: number }>();
         for (const id of subsidizedIds) {
           const info = complaintInfo.get(id);
           if (!info) continue;
-          donutMap.set(info.village, (donutMap.get(info.village) ?? 0) + 1);
+          const key = info.moo != null ? String(info.moo) : info.village;
+          const current = donutMap.get(key);
+          donutMap.set(key, {
+            village: info.village,
+            count: (current?.count ?? 0) + 1,
+          });
         }
-        const donut = [...donutMap.entries()]
-          .map(([village, count]) => ({ village, count }))
-          .sort((a, b) => b.count - a.count);
+        const donut = [...donutMap.values()].sort((a, b) => b.count - a.count);
 
         // ===== แท่ง: งบสมทบจริง แยกหมู่บ้าน =====
-        const barMap = new Map<string, number>();
+        const barMap = new Map<string, { village: string; budget: number }>();
         for (const id of subsidizedIds) {
           const info = complaintInfo.get(id);
           if (!info) continue;
-          barMap.set(info.village, (barMap.get(info.village) ?? 0) + info.shortfall);
+          const key = info.moo != null ? String(info.moo) : info.village;
+          const current = barMap.get(key);
+          barMap.set(key, {
+            village: info.village,
+            budget: (current?.budget ?? 0) + info.shortfall,
+          });
         }
-        const bar = [...barMap.entries()]
-          .map(([village, budget]) => ({ village, budget }))
-          .sort((a, b) => b.budget - a.budget);
+        const bar = [...barMap.values()].sort((a, b) => b.budget - a.budget);
 
         // ===== การ์ดตัวเลขรวม =====
         const totalReports = subsidizedIds.size;
@@ -1370,7 +1398,7 @@ Deno.serve(async (req) => {
 function sendPush(payload: {
   profileIds?: string[];
   roles?: string[];
-  village?: string;
+  moo?: number;
   title: string;
   body: string;
   useWaterAlert?: boolean;
@@ -1474,4 +1502,12 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+// แกะเลขหมู่จากข้อความเต็ม เช่น "หมู่ 9 บ้านบุญเรืองใต้" -> 9
+// (ชื่อหมู่บ้านซ้ำกันได้ระหว่าง 2 หมู่ เลขหมู่เท่านั้นที่ไม่ซ้ำแน่นอน)
+function mooFromLabel(label: string | null): number | null {
+  if (!label) return null;
+  const match = label.trim().match(/^หมู่\s*(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
 }

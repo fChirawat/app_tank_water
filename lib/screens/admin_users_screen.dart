@@ -497,7 +497,17 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   Widget _userCard(ManagedUser user) {
     final specialRoles = user.roles
         .where((r) => _assignableRoles.containsKey(r))
-        .map((r) => _assignableRoles[r]!)
+        .map((r) {
+          final label = _assignableRoles[r]!;
+          // ผู้ใหญ่บ้าน/เจ้าหน้าที่ -> ต่อท้ายด้วยเลขหมู่ที่ดูแล กันงงว่าคนไหนดูแลหมู่ไหน
+          final village = r == 'village_head'
+              ? user.headVillage
+              : r == 'officer'
+                  ? user.officerVillage
+                  : null;
+          final moo = mooFromLabel(village);
+          return moo != null ? '$label หมู่ $moo' : label;
+        })
         .toList();
     final isAdmin = user.roles.contains('admin');
 
@@ -782,12 +792,12 @@ class _RoleSheetState extends State<_RoleSheet> {
             Flexible(
               child: ListView(
                 shrinkWrap: true,
-                children: kVillages.map((v) {
+                children: kVillagesWithMoo.map((label) {
                   return ListTile(
                     leading: const Icon(Icons.home_work_outlined,
                         color: AppColors.primary),
-                    title: Text(v),
-                    onTap: () => Navigator.pop(ctx, v),
+                    title: Text(label),
+                    onTap: () => Navigator.pop(ctx, label),
                   );
                 }).toList(),
               ),

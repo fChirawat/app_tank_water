@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:printing/printing.dart';
 
+import '../data/villages.dart';
 import '../services/complaint_service.dart';
 import '../services/dashboard_pdf_service.dart';
 import '../services/feature_unlock_service.dart';
@@ -52,31 +53,33 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
   bool _loadingCompare = false;
 
   // 1 หมู่บ้าน = 1 หมู่ ตายตัว
+  // หมายเหตุ: "บ้านบุญเรืองใต้" ใช้ชื่อซ้ำกันทั้งหมู่ 2 และหมู่ 9 (คนละหมู่จริง)
+  // แผนภูมิที่กลุ่มข้อมูลตามชื่อจากฝั่งเซิร์ฟเวอร์จะยังแยกหมู่ 2/9 ไม่ได้
+  // จนกว่าจะแก้ query ฝั่ง backend ให้กลุ่มตามหมู่แทนชื่อ (ยังไม่ได้แก้จุดนี้)
   static const Map<String, int> _villageMooMap = {
-    'บุญเรืองเหนือ': 1,
-    'บุญเรืองใต้': 2,
+    'บ้านบุญเรืองเหนือ': 1,
+    'บ้านบุญเรืองใต้': 2,
     'บ้านซาววา': 3,
     'บ้านหก': 4,
-    'ต้นปล้อง': 5,
-    'แดนเมือง': 6,
+    'บ้านต้นปล้อง': 5,
+    'บ้านแดนเมือง': 6,
     'บ้านป่าเคาะ': 7,
     'บ้านต้นปล้องใต้': 8,
-    'บ้านป่าอ้อ': 9,
     'บ้านภูแกง': 10,
   };
 
-  // สีประจำหมู่บ้านแบบตายตัว
-  static const Map<String, Color> _villageColors = {
-    'บุญเรืองเหนือ': Color(0xFF7C5CFC),
-    'บุญเรืองใต้': Color(0xFF4CAF50),
-    'บ้านซาววา': Color(0xFFFF9800),
-    'บ้านหก': Color(0xFF2196F3),
-    'ต้นปล้อง': Color(0xFFE91E63),
-    'แดนเมือง': Color(0xFF00BCD4),
-    'บ้านป่าเคาะ': Color(0xFFFFC107),
-    'บ้านต้นปล้องใต้': Color(0xFF9C27B0),
-    'บ้านป่าอ้อ': Color(0xFF8BC34A),
-    'บ้านภูแกง': Color(0xFFFF5722),
+  // สีประจำหมู่บ้านแบบตายตัว — คีย์ด้วยเลขหมู่ (ไม่ใช่ชื่อ) กันหมู่ 2/9 สีชนกัน
+  static const Map<int, Color> _villageColorsByMoo = {
+    1: Color(0xFF7C5CFC),
+    2: Color(0xFF4CAF50),
+    3: Color(0xFFFF9800),
+    4: Color(0xFF2196F3),
+    5: Color(0xFFE91E63),
+    6: Color(0xFF00BCD4),
+    7: Color(0xFFFFC107),
+    8: Color(0xFF9C27B0),
+    9: Color(0xFF3F51B5),
+    10: Color(0xFFFF5722),
   };
 
   @override
@@ -166,8 +169,12 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
     return 'หมู่ $moo $villageName';
   }
 
+  // village ที่ส่งเข้ามาเป็น label เต็ม "หมู่ X ชื่อ" อยู่แล้ว (จาก fetchPaladDashboard)
+  // ต้องแกะเลขหมู่มาเทียบสี ไม่ใช้ชื่อ เพราะชื่อซ้ำกันได้ระหว่างหมู่ 2/9
   Color _villageColor(String village) {
-    return _villageColors[village] ?? AppColors.textGrey;
+    final moo = mooFromLabel(village) ?? mooOfVillage(village);
+    if (moo == null) return AppColors.textGrey;
+    return _villageColorsByMoo[moo] ?? AppColors.textGrey;
   }
 
   @override
@@ -825,12 +832,11 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
               final index = value.toInt();
               if (index < 0 || index >= entries.length) return const SizedBox();
               final village = entries[index].village;
-              final moo = mooOfVillage(village);
               return SideTitleWidget(
                 meta: meta,
                 space: 8,
                 child: Text(
-                  moo == null ? village : 'หมู่ $moo',
+                  villageWithMoo(village),
                   maxLines: 2,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
@@ -1385,13 +1391,12 @@ class _PaladDashboardScreenState extends State<PaladDashboardScreen> {
               }
 
               final village = data.bar[index].village;
-              final moo = mooOfVillage(village);
 
               return SideTitleWidget(
                 meta: meta,
                 space: 8,
                 child: Text(
-                  moo == null ? village : 'หมู่ $moo',
+                  villageWithMoo(village),
                   maxLines: 2,
                   textAlign: TextAlign.center,
                   style: const TextStyle(

@@ -111,12 +111,12 @@ class ComplaintService {
   }
 
   // ===== ดูสถานะประปา (แทงค์ + เรื่องล่าสุด) =====
-  // village ว่าง = ทุกหมู่บ้าน
-  static Future<List<TankStatus>> fetchTankStatus(String? village) async {
+  // moo ว่าง (null) = ทุกหมู่บ้าน — กรองด้วยเลขหมู่ กันชื่อหมู่บ้านซ้ำกัน 2 หมู่ปนกัน
+  static Future<List<TankStatus>> fetchTankStatus(int? moo) async {
     final data = await _invoke({
       'accessToken': AppSession.accessToken,
       'action': 'tank-status',
-      'village': village ?? '',
+      'moo': moo,
     });
 
     return (data['tanks'] as List)

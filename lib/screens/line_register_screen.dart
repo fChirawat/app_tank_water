@@ -45,9 +45,17 @@ class _LineRegisterScreenState extends State<LineRegisterScreen> {
 
   Future<void> _onSave() async {
     // เช็คว่ากรอกครบไหม
+    if (_selectedTitle == null) {
+      AppDialog.warn(context, 'กรุณาเลือกคำนำหน้า');
+      return;
+    }
     if (_firstNameController.text.trim().isEmpty ||
         _lastNameController.text.trim().isEmpty) {
       AppDialog.warn(context, 'กรุณากรอกชื่อและนามสกุล');
+      return;
+    }
+    if (_houseNoController.text.trim().isEmpty) {
+      AppDialog.warn(context, 'กรุณากรอกบ้านเลขที่');
       return;
     }
     if (_selectedVillage == null) {
@@ -64,9 +72,7 @@ class _LineRegisterScreenState extends State<LineRegisterScreen> {
         firstName: _firstNameController.text.trim(),
         lastName: _lastNameController.text.trim(),
         houseNo: _houseNoController.text.trim(),
-        village: _selectedVillage == null
-            ? null
-            : villageWithMoo(_selectedVillage!),
+        village: _selectedVillage,
         avatarUrl: widget.pictureUrl,
       );
 
@@ -253,7 +259,7 @@ class _LineRegisterScreenState extends State<LineRegisterScreen> {
           _buildDropdown(
             value: _selectedVillage,
             hint: 'เลือกหมู่บ้าน',
-            options: kVillages,
+            options: kVillagesWithMoo,
             onChanged: (v) => setState(() {
               _selectedVillage = v;
             }),

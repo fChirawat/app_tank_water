@@ -601,7 +601,7 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
             border: Border.all(color: AppColors.border),
           ),
           child: Column(
-            children: kVillages.map((v) {
+            children: kVillagesWithMoo.map((v) {
               final checked = _villages.contains(v);
               return InkWell(
                 onTap: () => setState(() {
@@ -626,7 +626,7 @@ class _AnnouncementCreateScreenState extends State<AnnouncementCreateScreen> {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        villageWithMoo(v),
+                        v,
                         style: TextStyle(
                           fontSize: 14.5,
                           color: AppColors.textDark,

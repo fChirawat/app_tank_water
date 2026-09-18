@@ -58,7 +58,7 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
       // ให้เตะออกทันที กันฟอร์มโชว์ค่าหมู่บ้านผิด (ล็อกช่องเป็นหมู่บ้านของแทงค์
       // แทนที่จะเป็นหมู่บ้านที่ตัวเองดูแลจริง ทำให้บันทึกไปเซิร์ฟเวอร์ก็ปฏิเสธอยู่ดี
       // แต่ผู้ใช้จะงงว่าทำไมกดบันทึกไม่ผ่าน)
-      if (_lockVillage && t.village != AppSession.officerVillage) {
+      if (_lockVillage && t.moo != mooFromLabel(AppSession.officerVillage)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           AppDialog.error(context, 'แก้ไขได้เฉพาะแทงค์น้ำในหมู่บ้านที่ดูแลเท่านั้น');
@@ -82,10 +82,9 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
       // โหมดเพิ่มใหม่: ถ้าเป็นเจ้าหน้าที่หมู่บ้าน (ไม่ใช่เทศบาล/แอดมิน)
       // ล็อกหมู่บ้านเป็นหมู่ที่ตัวเองดูแล
       if (_lockVillage) {
-        _selectedVillage = AppSession.officerVillage;
-        if (_selectedVillage != null) {
-          _selectedMoo = mooOfVillage(_selectedVillage!);
-        }
+        final officerMoo = mooFromLabel(AppSession.officerVillage);
+        _selectedMoo = officerMoo;
+        _selectedVillage = villageNameOfMoo(officerMoo);
       }
     }
   }
@@ -264,8 +263,8 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      _selectedVillage != null
-                                          ? villageWithMoo(_selectedVillage!)
+                                      _selectedMoo != null
+                                          ? villageLabelOfMoo(_selectedMoo!)
                                           : '-',
                                       style: const TextStyle(
                                           fontSize: 14,
@@ -276,14 +275,14 @@ class _WaterTankAddScreenState extends State<WaterTankAddScreen> {
                                 ],
                               ),
                             )
-                          : _dropdown<String>(
-                              value: _selectedVillage,
+                          : _dropdown<int>(
+                              value: _selectedMoo,
                               hint: 'เลือกหมู่บ้าน',
-                              items: kVillages,
-                              itemLabel: (v) => villageWithMoo(v),
-                              onChanged: (v) => setState(() {
-                                _selectedVillage = v;
-                                _selectedMoo = mooOfVillage(v);
+                              items: kVillageMooMap.keys.toList(),
+                              itemLabel: (moo) => villageLabelOfMoo(moo),
+                              onChanged: (moo) => setState(() {
+                                _selectedMoo = moo;
+                                _selectedVillage = villageNameOfMoo(moo);
                               }),
                             ),
                       const SizedBox(height: 16),

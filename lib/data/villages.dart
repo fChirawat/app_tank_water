@@ -4,40 +4,46 @@
 // ===================================================
 
 // ===== หมู่บ้าน =====
-// 1 หมู่บ้าน = 1 หมู่ (ตายตัว) เรียงตามหมู่ที่ 1-10
-// key = ชื่อหมู่บ้าน, value = หมู่ที่
-const Map<String, int> kVillageMooMap = {
-  'บุญเรืองเหนือ': 1,
-  'บุญเรืองใต้': 2,
-  'บ้านซาววา': 3,
-  'บ้านหก': 4,
-  'ต้นปล้อง': 5,
-  'แดนเมือง': 6,
-  'บ้านป่าเคาะ': 7,
-  'บ้านต้นปล้องใต้': 8,
-  'บ้านป่าอ้อ': 9,
-  'บ้านภูแกง': 10,
+// เรียงตามหมู่ที่ 1-10 — key = หมู่ที่ (ไม่ซ้ำแน่นอน), value = ชื่อหมู่บ้าน
+// หมายเหตุ: ชื่อหมู่บ้านซ้ำกันได้ (เช่น หมู่ 2 กับหมู่ 9 ชื่อ "บ้านบุญเรืองใต้" ทั้งคู่
+// เพราะเป็นคนละหมู่ทางปกครองแต่ใช้ชื่อชุมชนเดียวกัน) จึงห้ามใช้ "ชื่อ" เป็นตัวระบุ
+// หมู่บ้านที่ไม่ซ้ำกันอีกต่อไป ต้องใช้ "หมู่ที่" หรือข้อความเต็ม "หมู่ X ชื่อ" แทน
+const Map<int, String> kVillageMooMap = {
+  1: 'บ้านบุญเรืองเหนือ',
+  2: 'บ้านบุญเรืองใต้',
+  3: 'บ้านซาววา',
+  4: 'บ้านหก',
+  5: 'บ้านต้นปล้อง',
+  6: 'บ้านแดนเมือง',
+  7: 'บ้านป่าเคาะ',
+  8: 'บ้านต้นปล้องใต้',
+  9: 'บ้านบุญเรืองใต้',
+  10: 'บ้านภูแกง',
 };
 
-// รายชื่อหมู่บ้านอย่างเดียว (ไว้ใส่ dropdown)
-List<String> get kVillages => kVillageMooMap.keys.toList();
-
-// หา "หมู่ที่" ของหมู่บ้าน
-int? mooOfVillage(String? villageName) {
-  if (villageName == null) return null;
-  return kVillageMooMap[villageName];
+// ชื่อหมู่บ้านจากเลขหมู่
+String? villageNameOfMoo(int? moo) {
+  if (moo == null) return null;
+  return kVillageMooMap[moo];
 }
 
-// ข้อความเต็ม เช่น "หมู่ 1 บุญเรืองเหนือ"
-String villageWithMoo(String villageName) {
-  final moo = kVillageMooMap[villageName];
-  if (moo == null) return villageName;
-  return 'หมู่ $moo $villageName';
+// ข้อความเต็มจากเลขหมู่ เช่น 9 -> "หมู่ 9 บ้านบุญเรืองใต้"
+String villageLabelOfMoo(int moo) {
+  final name = kVillageMooMap[moo];
+  if (name == null) return 'หมู่ $moo';
+  return 'หมู่ $moo $name';
 }
 
-// รายการข้อความเต็มทั้งหมด (ไว้ใส่ dropdown แบบมีหมู่)
+// หาเลขหมู่จากข้อความเต็ม เช่น "หมู่ 9 บ้านบุญเรืองใต้" -> 9
+int? mooFromLabel(String? label) {
+  if (label == null) return null;
+  final match = RegExp(r'^หมู่\s*(\d+)').firstMatch(label.trim());
+  return match == null ? null : int.tryParse(match.group(1)!);
+}
+
+// รายการข้อความเต็มทั้งหมด เรียงตามหมู่ 1-10 (ไม่ซ้ำกัน ใช้เป็นตัวระบุหมู่บ้านได้)
 List<String> get kVillagesWithMoo =>
-    kVillageMooMap.entries.map((e) => 'หมู่ ${e.value} ${e.key}').toList();
+    kVillageMooMap.entries.map((e) => 'หมู่ ${e.key} ${e.value}').toList();
 
 // ===== ประเภทประปา =====
 const List<String> kTankTypes = [

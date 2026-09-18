@@ -78,6 +78,9 @@ Deno.serve(async (req) => {
     // หมู่บ้านที่เจ้าหน้าที่คนนี้ดูแล — ใช้จำกัดไม่ให้ยุ่งกับแทงค์น้ำหมู่บ้านอื่น
     const officerRow = (roles ?? []).find((r) => r.role === 'officer');
     const officerVillage = (officerRow?.village as string | undefined) ?? null;
+    // เลขหมู่ที่แท้จริง (กันชื่อหมู่บ้านซ้ำกัน 2 หมู่ปนกัน) — ใช้เทียบกับ
+    // water_tanks.moo แทนชื่อ village เสมอ เมื่อต้องเช็คสิทธิ์ตามหมู่บ้าน
+    const officerMoo = mooFromLabel(officerVillage);
 
     // ===== 5) ทำงานตามที่สั่ง =====
     switch (action) {
@@ -118,10 +121,10 @@ Deno.serve(async (req) => {
         if (!tank?.name || !tank?.type || !tank?.village || tank?.moo == null) {
           return json({ error: 'ข้อมูลไม่ครบ' }, 400);
         }
-        if (!officerVillage) {
+        if (officerMoo == null) {
           return json({ error: 'เจ้าหน้าที่ยังไม่ได้ผูกหมู่บ้าน' }, 400);
         }
-        if (tank.village !== officerVillage) {
+        if (tank.moo !== officerMoo) {
           return json({ error: 'เพิ่มแทงค์น้ำได้เฉพาะหมู่บ้านที่ดูแลเท่านั้น' }, 403);
         }
 
@@ -153,21 +156,21 @@ Deno.serve(async (req) => {
 
       case 'update': {
         if (!tankId) return json({ error: 'ไม่ได้ระบุแทงค์ที่จะแก้' }, 400);
-        if (!officerVillage) {
+        if (officerMoo == null) {
           return json({ error: 'เจ้าหน้าที่ยังไม่ได้ผูกหมู่บ้าน' }, 400);
         }
 
         // เช็คว่าแทงค์ตัวเดิมอยู่ในหมู่บ้านที่ดูแลไหม (กันแก้แทงค์หมู่บ้านอื่น)
         const { data: existing, error: existingErr } = await admin
           .from('water_tanks')
-          .select('village')
+          .select('moo')
           .eq('id', tankId)
           .maybeSingle();
 
         if (existingErr || !existing) {
           return json({ error: 'ไม่พบแทงค์น้ำนี้' }, 404);
         }
-        if (existing.village !== officerVillage || tank?.village !== officerVillage) {
+        if (existing.moo !== officerMoo || tank?.moo !== officerMoo) {
           return json({ error: 'แก้ไขได้เฉพาะแทงค์น้ำในหมู่บ้านที่ดูแลเท่านั้น' }, 403);
         }
 
@@ -200,21 +203,21 @@ Deno.serve(async (req) => {
 
       case 'delete': {
         if (!tankId) return json({ error: 'ไม่ได้ระบุแทงค์ที่จะลบ' }, 400);
-        if (!officerVillage) {
+        if (officerMoo == null) {
           return json({ error: 'เจ้าหน้าที่ยังไม่ได้ผูกหมู่บ้าน' }, 400);
         }
 
         // เช็คว่าแทงค์นี้อยู่ในหมู่บ้านที่ดูแลไหม (กันลบแทงค์หมู่บ้านอื่น)
         const { data: existing, error: existingErr } = await admin
           .from('water_tanks')
-          .select('village')
+          .select('moo')
           .eq('id', tankId)
           .maybeSingle();
 
         if (existingErr || !existing) {
           return json({ error: 'ไม่พบแทงค์น้ำนี้' }, 404);
         }
-        if (existing.village !== officerVillage) {
+        if (existing.moo !== officerMoo) {
           return json({ error: 'ลบได้เฉพาะแทงค์น้ำในหมู่บ้านที่ดูแลเท่านั้น' }, 403);
         }
 
@@ -242,4 +245,12 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+// แกะเลขหมู่จากข้อความเต็ม เช่น "หมู่ 9 บ้านบุญเรืองใต้" -> 9
+// (ชื่อหมู่บ้านซ้ำกันได้ระหว่าง 2 หมู่ เลขหมู่เท่านั้นที่ไม่ซ้ำแน่นอน)
+function mooFromLabel(label: string | null): number | null {
+  if (!label) return null;
+  const match = label.trim().match(/^หมู่\s*(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
 }

@@ -141,7 +141,9 @@ Deno.serve(async (req) => {
     let profileIds: string[] = (body.profileIds as string[] | undefined) ?? [];
 
     const roles = body.roles as string[] | undefined;
-    const village = body.village as string | undefined;
+    // ระบุหมู่บ้านเป้าหมายด้วยเลขหมู่ (moo) เท่านั้น ไม่ใช่ชื่อ เพราะชื่อหมู่บ้าน
+    // ซ้ำกันได้ระหว่าง 2 หมู่ (เช่น หมู่ 2 กับหมู่ 9 ชื่อ "บ้านบุญเรืองใต้" ทั้งคู่)
+    const moo = body.moo as number | undefined;
 
     if (roles && roles.length > 0) {
       let q = admin.from('user_roles').select('profile_id, role, village');
@@ -149,8 +151,8 @@ Deno.serve(async (req) => {
 
       for (const r of roleRows ?? []) {
         // ผู้ใหญ่บ้าน/เจ้าหน้าที่: ส่งเฉพาะคนที่ดูแลหมู่บ้านนั้น
-        if ((r.role === 'village_head' || r.role === 'officer') && village) {
-          if (r.village !== village) continue;
+        if ((r.role === 'village_head' || r.role === 'officer') && moo != null) {
+          if (mooFromLabel(r.village as string | null) !== moo) continue;
         }
         profileIds.push(r.profile_id as string);
       }
@@ -253,4 +255,11 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+// แกะเลขหมู่จากข้อความเต็ม เช่น "หมู่ 9 บ้านบุญเรืองใต้" -> 9
+function mooFromLabel(label: string | null): number | null {
+  if (!label) return null;
+  const match = label.trim().match(/^หมู่\s*(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
 }

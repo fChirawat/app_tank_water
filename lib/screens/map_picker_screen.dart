@@ -199,9 +199,10 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
           onTap: _onMapTap,
         ),
         children: [
-          // ชั้นแผนที่จาก OpenStreetMap
+          // ชั้นแผนที่ดาวเทียมจาก Esri World Imagery
           TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            urlTemplate:
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'com.example.water_app',
           ),
           // จุดสีฟ้าแสดงตำแหน่งปัจจุบันของเรา

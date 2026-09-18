@@ -17,10 +17,7 @@ class TankStatusScreen extends StatefulWidget {
 }
 
 class _TankStatusScreenState extends State<TankStatusScreen> {
-  // ค่าพิเศษสำหรับ "ทุกหมู่บ้าน"
-  static const String _allVillages = '__all__';
-
-  late String _selectedVillage; // หมู่บ้านที่กำลังดู
+  int? _selectedMoo; // หมู่ที่กำลังดู (null = ทุกหมู่บ้าน)
   List<TankStatus> _tanks = [];
   bool _loading = true;
   String? _error;
@@ -28,29 +25,26 @@ class _TankStatusScreenState extends State<TankStatusScreen> {
   @override
   void initState() {
     super.initState();
-    // default = หมู่บ้านของผู้ใช้ (ตัดคำว่า "หมู่ x" ออก เก็บแค่ชื่อหมู่บ้าน)
-    _selectedVillage = _myVillage() ?? _allVillages;
+    // default = หมู่บ้านของผู้ใช้
+    _selectedMoo = _myMoo();
     _load();
   }
 
-  // หาหมู่บ้าน default ให้ตรงกับบทบาท
+  // หาหมู่บ้าน default ให้ตรงกับบทบาท (คืนเป็นเลขหมู่ กันชื่อซ้ำ 2 หมู่ปนกัน)
   // - ผู้ใหญ่บ้าน/เจ้าหน้าที่หมู่บ้าน -> หมู่บ้านที่ตัวเอง "ดูแล" (อาจไม่ใช่หมู่บ้านที่อยู่)
   // - ประชาชน/เจ้าหน้าที่เทศบาล -> หมู่บ้านที่อยู่อาศัยจากโปรไฟล์
-  String? _myVillage() {
+  int? _myMoo() {
     if (AppSession.isOfficer && AppSession.officerVillage != null) {
-      return AppSession.officerVillage;
+      return mooFromLabel(AppSession.officerVillage);
     }
     if (AppSession.isVillageHead && AppSession.headVillage != null) {
-      return AppSession.headVillage;
+      return mooFromLabel(AppSession.headVillage);
     }
 
     final v = AppSession.profile?['village'] as String?;
     if (v == null || v.isEmpty) return null;
-    // โปรไฟล์เก็บเป็น "หมู่ 3 บ้านซาววา" -> เทียบกับ kVillages หาชื่อที่ตรง
-    for (final name in kVillages) {
-      if (v.contains(name)) return name;
-    }
-    return null;
+    // โปรไฟล์เก็บเป็น "หมู่ 3 บ้านซาววา" -> ตัดเอาเลขหมู่
+    return mooFromLabel(v);
   }
 
   Future<void> _load() async {
@@ -59,9 +53,7 @@ class _TankStatusScreenState extends State<TankStatusScreen> {
       _error = null;
     });
     try {
-      final village =
-          _selectedVillage == _allVillages ? null : _selectedVillage;
-      final tanks = await ComplaintService.fetchTankStatus(village);
+      final tanks = await ComplaintService.fetchTankStatus(_selectedMoo);
       if (!mounted) return;
       setState(() {
         _tanks = tanks;
@@ -182,20 +174,19 @@ class _TankStatusScreenState extends State<TankStatusScreen> {
         border: Border.all(color: AppColors.border),
       ),
       child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selectedVillage,
+        child: DropdownButton<int?>(
+          value: _selectedMoo,
           isExpanded: true,
           icon: const Icon(Icons.keyboard_arrow_down,
               color: AppColors.textGrey),
           items: [
-            const DropdownMenuItem(
-                value: _allVillages, child: Text('ทุกหมู่บ้าน')),
-            ...kVillages.map(
-                (v) => DropdownMenuItem(value: v, child: Text(v))),
+            const DropdownMenuItem<int?>(
+                value: null, child: Text('ทุกหมู่บ้าน')),
+            ...kVillageMooMap.keys.map((moo) => DropdownMenuItem<int?>(
+                value: moo, child: Text(villageLabelOfMoo(moo)))),
           ],
-          onChanged: (v) {
-            if (v == null) return;
-            setState(() => _selectedVillage = v);
+          onChanged: (moo) {
+            setState(() => _selectedMoo = moo);
             _load();
           },
         ),

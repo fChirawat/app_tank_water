@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
     } = await req.json();
 
     // เช็คข้อมูลที่จำเป็น
-    if (!accessToken || !firstName || !lastName) {
+    if (!accessToken || !title || !firstName || !lastName || !houseNo || !village) {
       return json({ error: 'ข้อมูลไม่ครบ' }, 400);
     }
 
