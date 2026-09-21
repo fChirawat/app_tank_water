@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../services/update_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/update_dialog.dart';
 import 'citizen_home_screen.dart';
 import 'welcome_screen.dart';
 
@@ -21,6 +24,17 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _check() async {
+    // เช็คเวอร์ชันใหม่ก่อน (เฉพาะ Android/iOS ไม่เกี่ยวกับเว็บ)
+    // ถ้าเช็คไม่ได้/ไม่มีอัปเดตใหม่ ก็ผ่านไปเข้าแอปตามปกติ ไม่บล็อกผู้ใช้
+    if (!kIsWeb) {
+      final update = await UpdateService.checkForUpdate();
+      if (update != null && mounted) {
+        await showUpdateDialog(context, update);
+      }
+    }
+
+    if (!mounted) return;
+
     // ลองล็อกอินอัตโนมัติด้วย token ที่เคยเก็บไว้
     final result = await AuthService.tryAutoLogin();
 

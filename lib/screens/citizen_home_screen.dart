@@ -176,14 +176,25 @@ List<UserRole> rolesFromStrings(List<String> names) {
 }
 
 // รวมเมนูจากทุก role ที่ผู้ใช้มี (ตัดเมนูชื่อซ้ำออก เช่น Dashboard)
+// เรียงตามลำดับตายตัวของ UserRole.values เสมอ (citizen, officer, villageHead,
+// palad, admin) ไม่ใช่ตามลำดับที่แอดมินกดเพิ่ม role ให้คนนั้น แล้วดัน "Dashboard"
+// ไปไว้ท้ายสุดเสมอไม่ว่าจะมาจาก role ไหน
 List<MenuItemData> menusForRoles(List<UserRole> roles) {
+  final roleSet = roles.toSet();
   final seen = <String>{};
   final result = <MenuItemData>[];
-  for (final role in roles) {
+  for (final role in UserRole.values) {
+    if (!roleSet.contains(role)) continue;
     for (final item in _roleMenus[role] ?? const <MenuItemData>[]) {
       if (seen.add(item.label)) result.add(item);
     }
   }
+
+  final dashboardIndex = result.indexWhere((item) => item.label == 'Dashboard');
+  if (dashboardIndex != -1 && dashboardIndex != result.length - 1) {
+    result.add(result.removeAt(dashboardIndex));
+  }
+
   return result;
 }
 

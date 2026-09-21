@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- ให้ผู้ใช้กดติดตั้ง APK อัปเดตที่ดาวน์โหลดในแอปได้ (นอกระบบ Play Store) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="ประปาบุญเรือง"
         android:name="${applicationName}"
